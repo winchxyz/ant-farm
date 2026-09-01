@@ -279,6 +279,34 @@
       var hx = c.farm.half[0] - 0.8, hz = c.farm.half[2] - 0.8;
       c.pos[0] = M.clamp(c.pos[0], c.farm.center[0] - hx, c.farm.center[0] + hx);
       c.pos[2] = M.clamp(c.pos[2], c.farm.center[2] - hz, c.farm.center[2] + hz);
+
+      //  STONES ARE SOLID.
+      //
+      //  Movement was a straight step toward the target followed by a clamp
+      //  to the glass, and nothing else - so every animal walked through the
+      //  pebbles as if they were painted on. Push out of any stone it has
+      //  ended up inside, along the line from the stone's centre, which
+      //  makes it slide around the obstacle instead of stopping dead
+      //  against it.
+      //
+      //  Grass is not solid: a woodlouse walks through a tuft, and blocking
+      //  on grass would fence the animals into the bare patches.
+      var props = c.farm.props;
+      if (props) {
+        var reach = 2.2 + d.scale;
+        for (var pi = 0; pi < props.length; pi++) {
+          var pr = props[pi];
+          if (pr.kind === 'grass') continue;
+          var dx = c.pos[0] - pr.x, dz = c.pos[2] - pr.z;
+          var dd = dx * dx + dz * dz;
+          if (dd > reach * reach) continue;
+          var need = pr.scale * 0.62 + d.scale * 0.42;
+          if (dd >= need * need || dd < 1e-6) continue;
+          var dl = Math.sqrt(dd);
+          c.pos[0] = pr.x + dx / dl * need;
+          c.pos[2] = pr.z + dz / dl * need;
+        }
+      }
       //  ride the terrain, and the sugar heap on top of it
       var ground = c.farm.localTop(c.pos[0], c.pos[2]);
       if (AF.Heap) ground = Math.max(ground, AF.Heap.surfaceAt(c.pos[0], c.pos[2]));
