@@ -62,14 +62,44 @@
     dirty = true; total = 0;
   };
 
-  //  The ground under the heap can move (digging), so it is re-sampled
-  //  rather than assumed. Cheap: one localTop per cell, done on demand.
+  //  THE GROUND IS THE SOIL, NOT THE FORMULA.
+  //
+  //  This sampled farm.localTop, which is the ANALYTIC terrain height - a
+  //  closed-form function of x and z. The shovel does not touch it: digging
+  //  subtracts capsules from the soil distance field, and localTop keeps
+  //  returning the height the terrain had before anything was dug. Measured
+  //  on a live tank: seventy-seven scoops carved a bowl and localTop stayed
+  //  at 6.39 throughout.
+  //
+  //  So sugar poured over an excavation rested at the height of ground that
+  //  is no longer there, and hung in the air over the hole.
+  //
+  //  Start at the analytic top and walk down until the field says solid
+  //  (soilSDF is positive in open air, so solid is <= 0). Undug ground is
+  //  solid at the very first sample, which is the old behaviour and the same
+  //  cost; only cells over a hole pay for the descent.
+  var GND_STEP = 0.14;
+  var GND_MAX = 5.0;
+  function soilTopAt(x, z) {
+    var top = farm.localTop(x, z);
+    if (!farm.soilSDF) return top;
+    if (farm.soilSDF(x, top - 0.02, z) <= 0) return top;
+    for (var d = GND_STEP; d < GND_MAX; d += GND_STEP) {
+      if (farm.soilSDF(x, top - d, z) <= 0) return top - d + GND_STEP * 0.5;
+    }
+    //  Nothing solid within reach - a shaft straight through. Sit on the
+    //  bottom of the search rather than floating at the old surface.
+    return top - GND_MAX;
+  }
+
+  //  The ground under the heap moves whenever the player digs, so it is
+  //  re-sampled rather than assumed.
   HP.rebakeGround = function () {
     if (!farm) return;
     for (var j = 0; j < gz; j++) {
       var wz = minZ + j * CELL;
       for (var i = 0; i < gx; i++) {
-        gnd[j * gx + i] = farm.localTop(minX + i * CELL, wz);
+        gnd[j * gx + i] = soilTopAt(minX + i * CELL, wz);
       }
     }
     dirty = true;
@@ -303,7 +333,7 @@
   };
 
   HP.surfaceAt = function (x, z) {
-    return (farm ? farm.localTop(x, z) : 0) + HP.heightAt(x, z);
+    return (farm ? soilTopAt(x, z) : 0) + HP.heightAt(x, z);
   };
 
   //  Where are the heaps? Used to publish food to the foraging code and to
