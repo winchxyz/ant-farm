@@ -1249,3 +1249,74 @@ kbd{background:rgba(0,0,0,.35);border:1px solid rgba(255,255,255,.14);
   border:1.5px solid var(--p-food); background:rgba(78,155,95,.14);
   border-radius:6px;
 }
+
+/* ==================================================================
+   NARROW WINDOWS
+   ------------------------------------------------------------------
+   Found by running the layout audit at every window size rather than
+   only at the one I happened to be using. At 1024x700 the top bar ran
+   61px off the right edge - the three stat pills, the goal line, the
+   day box and the speed buttons are a fixed-width row that simply does
+   not fit - and the manual's Close button sat below its own panel.
+   ================================================================== */
+#bar{
+  display:flex; align-items:center; gap:12px; flex-wrap:wrap;
+  max-width:calc(100vw - 24px); row-gap:10px;
+}
+/*  The goal line is the only part that can afford to give: it shrinks and
+    ellipsises so the pills and the speed control keep their size.  */
+#goal{
+  flex:1 1 120px; min-width:0; overflow:hidden; text-overflow:ellipsis;
+  white-space:nowrap;
+}
+.stat, #dayBox, .speedbtns{ flex:0 0 auto; }
+
+@media (max-width:1120px){
+  .stat{ padding:9px 15px 9px 10px; gap:9px; }
+  .stat b{ font-size:19px; }
+  .stat span{ display:none; }        /* the icon already says which it is */
+  #dayBox{ padding:9px 14px; }
+  .speedbtns button{ width:32px; height:32px; }
+}
+@media (max-width:860px){
+  #goal{ display:none; }             /* the hint strip under the tray says it */
+  #toolbar{ width:min(96vw, 688px); }
+}
+
+/*  The manual scrolls its own body, so the Close button stays on the
+    panel instead of being pushed off the end of it.  */
+#help .panel-wide{ display:flex; flex-direction:column; overflow:hidden; }
+#help .help-grid{ overflow:auto; min-height:0; flex:1 1 auto; }
+#help .big-btn{ flex:0 0 auto; align-self:flex-start; }
+
+/*  The single-column collapse fired at 900px, which stacked all six
+    species and pushed the menu 409px past the bottom of an 820x640
+    window. Two columns survive much further down; the split only
+    collapses when the panel genuinely cannot hold them.  */
+@media (max-width:900px) and (min-width:660px){
+  #menu .menu-wrap{ grid-template-columns:minmax(240px,34%) 1fr;
+    grid-template-rows:auto auto auto; height:auto; min-height:100%;
+    overflow:auto; align-items:start; }
+  #menu .menu-head{ grid-column:1; grid-row:1 / span 3; min-height:100vh;
+    justify-content:center; padding:32px 28px; }
+  /*  Nothing inside scrolls at this width - the whole panel does.
+      Scrolling the choosing column alone did not hold it: the column
+      kept growing past its grid row and the graphics pills ended up
+      UNDERNEATH the buttons, rendered and unclickable. Measured with
+      elementFromPoint: all four pills answered btnStart or menu-foot.
+      One scroller instead of two nested ones cannot overlap.  */
+  #menu .menu-cols, #menu .menu-cols.two{ grid-column:2; grid-row:1;
+    grid-template-columns:1fr; gap:18px; padding:26px 28px 0;
+    overflow:visible; min-height:0; }
+  #menu #speciesList{ grid-template-columns:1fr 1fr; gap:6px; }
+  #menu #diffList{ display:grid; grid-template-columns:1fr 1fr 1fr; gap:6px; }
+  #menu .menu-foot{ grid-column:2; grid-row:2; padding:16px 28px 0; }
+  #menu .credit{ grid-column:2; grid-row:3; padding:10px 28px 16px; }
+  #menu .choice{ padding:9px 11px 8px; border-radius:12px; }
+  #menu .choice .cn{ font-size:15px; margin-bottom:2px; }
+  #menu .choice .perk, #menu .choice .cd{ font-size:12px; line-height:1.3; }
+  #menu .menu-head h1{ font-size:34px; }
+  #menu .tagline{ font-size:14px; margin-top:10px; }
+  #menu .big-btn{ padding:12px 24px; font-size:15px; }
+  #menu .ghost-btn{ padding:11px 16px; font-size:13px; }
+}
