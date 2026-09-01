@@ -593,8 +593,15 @@ kbd{background:rgba(0,0,0,.35);border:1px solid rgba(255,255,255,.14);
 
 /* one group at a time */
 #toolbar .tpages{ display:block; }
-#toolbar .tgroup{ display:none; grid-template-columns:repeat(6,minmax(0,1fr)); gap:8px; }
-#toolbar .tgroup.on{ display:grid; }
+/*  Fixed 116px tiles, centred - not six stretched columns. The groups
+    hold one, two, three, five and six tools, so a six-column grid left
+    the Dig group as a single tile floating in a wide empty card. Tiles
+    keep one size everywhere and the short groups sit in the middle,
+    which reads as deliberate rather than unfinished. The panel width
+    does not move between tabs, so the switch above it stays put.  */
+#toolbar .tgroup{ display:none; flex-wrap:wrap; justify-content:center; gap:8px; }
+#toolbar .tgroup.on{ display:flex; }
+#toolbar .tool{ flex:0 0 116px; }
 
 /* the tiles */
 #toolbar .tool{

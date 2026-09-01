@@ -151,7 +151,7 @@
       '<div class="help-sec"><h4>The idea</h4><ul>' +
       '<li>You have one glass tank and one queen. Everything else grows from there.</li>' +
       '<li><b>Workers</b> dig and haul. <b>Foragers</b> fetch food from the surface. <b>Soldiers</b> fight.</li>' +
-      '<li>Digging costs <b>Dirt ▤</b> — and digging also <b>gives dirt back</b>, so you rarely run dry.</li>' +
+      '<li>Digging costs <b>dirt</b> — and digging also <b>gives dirt back</b>, so you rarely run dry.</li>' +
       '<li>New ants cost <b>Food ◆</b>. Foragers keep it topped up on their own.</li>' +
       '<li>There is no way to lose except letting the queen die. Take your time.</li>' +
       '</ul></div>' +
@@ -309,8 +309,8 @@
     var dr = group('Dig');
     //  The shovel. It carves the soil itself rather than commissioning a
     //  room, so it sits with the digging tools but is not a chamber.
-    UI.digBtn = tool(dr, 'dig', 'shovel', 'Shovel', '▤' + AF.Game.DIG.cost, {
-      title: 'Shovel', cost: '▤ ' + AF.Game.DIG.cost + ' dirt per scoop',
+    UI.digBtn = tool(dr, 'dig', 'shovel', 'Shovel', '' + AF.Game.DIG.cost, {
+      title: 'Shovel', cost: AF.Game.DIG.cost + ' dirt per scoop',
       desc: 'Dig the soil away yourself. Hold and drag to carve a trench.' +
         '<br><br>Break into a tunnel and the colony will stop what it is doing and fill it back in.',
       keys: 'Hold to dig · Esc to stop'
@@ -328,7 +328,7 @@
       var key = i + 1;
       var b = tool(br, 'dig', (AF.ICON_CHAMBER && AF.ICON_CHAMBER[type]) || 'tunnel',
         ch.name, '' + cost, {
-        title: ch.name, cost: '▤ ' + cost + ' dirt', desc: ch.desc,
+        title: ch.name, cost: cost + ' dirt', desc: ch.desc,
         keys: 'Press ' + key + ' · then click · Shift keeps digging'
       }, function () { game.setBuild(game.buildType === type ? -1 : type); });
       UI.buildCards.push({ e: b, type: type, cost: cost });
@@ -342,9 +342,9 @@
     UI.spawnBtns = [];
     Object.keys(AF.Game.BESTIARY).forEach(function (k) {
       var cd = AF.Game.BESTIARY[k];
-      var b = tool(lr, 'life', k, cd.name, '\u25a4' + cd.cost, {
+      var b = tool(lr, 'life', k, cd.name, '' + cd.cost, {
         title: cd.name,
-        cost: '\u25a4 ' + cd.cost + ' dirt',
+        cost: cd.cost + ' dirt',
         desc: cd.desc + '<br><br>Health ' + cd.hp + ' \u00b7 Bite ' + cd.dmg +
           ' \u00b7 Meat ' + cd.meat,
         keys: 'Click the soil to place \u00b7 Esc to stop'
