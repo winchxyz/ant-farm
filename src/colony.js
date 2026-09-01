@@ -182,6 +182,18 @@
     if (game && this.isPlayer) game.ui.flashResource(type);
   };
 
+  //  The end screen has always read peakPop, and nothing ever wrote it -
+  //  so every run finished reporting "Peak ants 0", because the fallback
+  //  is the population at the moment of death, which is nought by then.
+  Colony.prototype.notePeak = function () {
+    if (!this.peakPop || this.ants.length > this.peakPop) this.peakPop = this.ants.length;
+    var rooms = 0;
+    for (var i = 0; i < this.farms.length; i++) {
+      if (this.farms[i] && this.farms[i].nodes) rooms += this.farms[i].nodes.length;
+    }
+    if (!this.peakRooms || rooms > this.peakRooms) this.peakRooms = rooms;
+  };
+
   Colony.prototype.onDeath = function (ant, cause) {
     this.losses++;
     this.waste += 1;
@@ -469,6 +481,7 @@
   //  TICK
   // ------------------------------------------------------------------
   Colony.prototype.update = function (dt, game) {
+    this.notePeak();
     var i;
     // upkeep
     var upkeep = 0;

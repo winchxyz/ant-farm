@@ -676,7 +676,7 @@
     $('endStats').innerHTML =
       '<div>Days <b>' + result.day + '</b></div>' +
       '<div>Peak ants <b>' + (p.peakPop || p.population()) + '</b></div>' +
-      '<div>Rooms dug <b>' + (p.farms[0] ? p.farms[0].nodes.length : 0) + '</b></div>' +
+      '<div>Rooms dug <b>' + (p.peakRooms || (p.farms[0] ? p.farms[0].nodes.length : 0)) + '</b></div>' +
       '<div>Ants lost <b>' + p.losses + '</b></div>';
     $('endscreen').classList.remove('hidden');
   };
