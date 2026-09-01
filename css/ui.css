@@ -1243,3 +1243,9 @@ kbd{background:rgba(0,0,0,.35);border:1px solid rgba(255,255,255,.14);
 /*  Costs on the tiles line up for the same reason - a two digit price
     must not shift the label above it.  */
 #toolbar .tool em{ min-width:2.4ch; text-align:center; display:inline-block; }
+
+/*  The drag box on the new palette. */
+#selbox{
+  border:1.5px solid var(--p-food); background:rgba(78,155,95,.14);
+  border-radius:6px;
+}

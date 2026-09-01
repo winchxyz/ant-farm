@@ -129,8 +129,13 @@
   function updateSelBox() {
     var b = document.getElementById('selbox');
     var inp = Game.input;
+    //  The box is for picking ants out of a crowd. It has no business
+    //  appearing while a tool is in hand: dragging the shovel, pouring, or
+    //  placing an animal all drag with the left button too, and every one of
+    //  them drew a selection rectangle over the work.
     if (inp.drag.active && inp.drag.button === 0 && inp.drag.moved > 9 &&
-      Game.buildType < 0 && !Game.pheroMode && !Game.input.ctrl() && !Game.input.alt()) {
+      Game.buildType < 0 && !Game.digMode && !Game.spawnType && !Game.pourType &&
+      !Game.pheroMode && !Game.input.ctrl() && !Game.input.alt()) {
       var x = Math.min(inp.drag.x0, inp.drag.x1), y = Math.min(inp.drag.y0, inp.drag.y1);
       var w = Math.abs(inp.drag.x1 - inp.drag.x0), h = Math.abs(inp.drag.y1 - inp.drag.y0);
       b.style.left = x + 'px'; b.style.top = y + 'px';

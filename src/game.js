@@ -601,7 +601,20 @@
       //  standing on nothing. The margin is deliberately loose so a prop on
       //  the lip of a shaft is kept rather than popped in and out as the
       //  tunnel creeps outward.
-      if (farm.soilSDF(p.x, p.y - 0.06, p.z) > 0.18) {
+      //  Two probes, not one. The first is under the prop itself. The
+      //  second is under it AT THE DIG PLANE, because the shovel only cuts
+      //  the thin slab against the front glass: a stone a little way behind
+      //  that slab keeps solid ground directly beneath it and passed the
+      //  first test, while the hole opened in front of it and left it
+      //  standing over the cut for anyone looking at the tank.
+      //
+      //  Also probe deeper than 6cm. A scoop that takes the surface but
+      //  leaves a crumb right under the base reads as solid at that depth
+      //  and floats anyway.
+      var open = farm.soilSDF(p.x, p.y - 0.06, p.z) > 0.18 ||
+        farm.soilSDF(p.x, p.y - 0.30, p.z) > 0.34 ||
+        farm.soilSDF(p.x, p.y - 0.06, farm.digZ) > 0.18;
+      if (open) {
         farm.props.splice(i, 1);
         cut++;
       }

@@ -76,15 +76,34 @@
     '}'
   ].join('\n');
 
-  //  Thickness: additive, no depth test. How much water is along this ray.
+  //  Thickness: additive. How much water is along this ray.
+  //
+  //  It used to accumulate from EVERY particle with no depth test at all.
+  //  Water that had run into a pit and settled behind the near wall still
+  //  wrote its thickness at its screen position - over sand that is in
+  //  FRONT of it - and the composite then shaded that sand as if it were
+  //  under water. That is the wash that survived the premultiply fix.
+  //
+  //  The depth pass runs first, so the front-most fluid surface for this
+  //  pixel is already known. Water sitting well behind that surface is
+  //  hidden, and contributes nothing the eye can see through.
   var FS_THICK = HEAD + [
     'in vec3 vEye; in float vRad, vSpd, vPack;',
     'uniform float uScale;',
+    'uniform sampler2D uSurf;',
+    'uniform vec2 uInvRes;',
     'out vec4 oThick;',
     'void main(){',
     '  vec2 c = vec2(gl_PointCoord.x, 1.0-gl_PointCoord.y)*2.0-1.0;',
     '  float m = dot(c,c);',
     '  if(m > 1.0) discard;',
+    '  vec3 e = vEye + vec3(c*vRad, sqrt(1.0-m)*vRad);',
+    '  float dep = -e.z;',
+    '  if(dep <= 0.0) discard;',
+    '  float surf = texture(uSurf, gl_FragCoord.xy*uInvRes).r;',
+    '  //  a real pool is allowed a few particle diameters of body; anything',
+    '  //  further back than that is behind something and does not count',
+    '  if(surf > 0.0 && dep > surf + 2.2) discard;',
     '  float w = (1.0-m)*uScale;',
     '  oThick = vec4(w, w*clamp(vSpd*0.10,0.0,1.0), 0.0, 0.0);',
     '}'
@@ -362,6 +381,8 @@
     GLX.depth(false, false); GLX.blend('addpre');
     P.thick.use()
       .m4('uView', cam.view).m4('uProj', cam.proj)
+      .tex('uSurf', FB.depth.color[0])
+      .v2('uInvRes', 1 / w, 1 / h)
       .f('uPointScale', pointScale).f('uScale', 0.055);
     gl.drawArrays(gl.POINTS, 0, nPart);
     gl.bindVertexArray(null);
