@@ -55,7 +55,11 @@
   var SCORR_K = 0.0005, SCORR_N = 4, SCORR_DQ = 0.2 * H;
   var XSPH_C = 0.10;
   var LEVEL_K = 0.22;
-  var MU_SOIL_WATER = 0.10, REST_WATER = 0.02, MASS_WATER = 1.0;
+  var MU_SOIL_WATER = 0.38, REST_WATER = 0.02, MASS_WATER = 1.0;
+
+  //  soaking - dry soil drinks the water it is touching
+  var SOAK_TIME = 14.0;          // mean seconds of contact before a drop is gone
+  var SOAK_CONTACT = PR * 1.25;  // how close to the soil counts as touching
 
   // sugar
   var D0 = 0.28;                 // contact distance
@@ -86,6 +90,7 @@
   var lam = new Float32Array(N), rho = new Float32Array(N);
   var mat = new Uint8Array(N), mass = new Float32Array(N), amt = new Float32Array(N);
   var wet = new Float32Array(N), restT = new Float32Array(N), rad = new Float32Array(N);
+  var soak = new Float32Array(N), soakCap = new Float32Array(N);
   var asleep = new Uint8Array(N), alive = new Uint8Array(N);
   var cid = new Int32Array(N);
   var nbr = new Int32Array(N * NEIGH_MAX), nbrN = new Int32Array(N);
@@ -104,7 +109,7 @@
 
   PS.reset = function () {
     count = 0; maxIdx = 0; freeTop = 0; awakeN = 0;
-    alive.fill(0); asleep.fill(0);
+    alive.fill(0); asleep.fill(0); soak.fill(0); soakCap.fill(0);
     PS.clusters = [];
     _clusterT = 0;
   };
@@ -163,6 +168,11 @@
     rad[i] = material === MAT_WATER ? 0.37 : 0.30;
     amt[i] = amount === undefined ? (material === MAT_WATER ? 0.55 : 0.42) : amount;
     wet[i] = 0; restT[i] = 0; cid[i] = -1;
+    //  Every drop gets its own patience. Without the spread a puddle
+    //  poured in one go touches the soil in one go and then vanishes in
+    //  one go - 700 particles gone inside four seconds, a cliff rather
+    //  than a drain. Staggered, the pool sinks away steadily.
+    soak[i] = 0; soakCap[i] = SOAK_TIME * (0.5 + Math.random());
     return i;
   };
 
@@ -623,6 +633,44 @@
   var _clusterT = 0;
   PS.stats = { solveMs: 0, substeps: 0, awake: 0, resident: 0 };
 
+  // ---------------------------------------------------------------
+  //  Soaking. Water lying against soil drains into it and is gone.
+  //
+  //  Only the layer actually touching the ground counts, so a deep pool
+  //  loses its bottom and settles rather than evaporating all at once,
+  //  while a thin film spilled on the surface simply sinks in. This runs
+  //  over every LIVE water particle, not the awake set: a puddle falls
+  //  asleep almost immediately, and a sleeping puddle is exactly the one
+  //  that should be soaking away.
+  // ---------------------------------------------------------------
+  PS.soakIntoSoil = function (farm, dt) {
+    if (!farm || dt <= 0) return 0;
+    var gone = 0;
+    for (var i = 0; i < maxIdx; i++) {
+      if (!alive[i] || mat[i] !== MAT_WATER) continue;
+      var d = PS.sdf(farm, px[i], py[i], pz[i], _g);
+      if (d < SOAK_CONTACT) {
+        soak[i] += dt;
+        if (soak[i] >= soakCap[i]) {
+          var rx = px[i], ry = py[i], rz = pz[i];
+          PS.remove(i);
+          gone++;
+          //  The drop above it was resting on the drop that just left. Wake
+          //  the neighbourhood or the pool hangs in place: the bottom layer
+          //  soaks away, nothing settles onto the soil to take its turn, and
+          //  a puddle stalls part-drained forever.
+          if (PS.wakeNear) PS.wakeNear(rx, ry, rz, H * 1.3);
+        }
+      } else if (soak[i] > 0) {
+        //  lifted clear of the ground again - it stops draining, but what
+        //  it already lost stays lost, so a sloshing pool still drains
+        soak[i] -= dt * 0.5;
+        if (soak[i] < 0) soak[i] = 0;
+      }
+    }
+    return gone;
+  };
+
   PS.step = function (rawDt, game) {
     var farm = _farm || (game && game.player && game.player.farms[0]) ||
       (game && game.world && game.world.farms[0]);
@@ -738,6 +786,7 @@
       PS.sleepPass(SUB_DT);
     }
 
+    PS.soakIntoSoil(farm, rawDt);
     PS.enforceBudget();
 
     _clusterT += rawDt;

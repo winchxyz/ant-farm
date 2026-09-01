@@ -98,6 +98,14 @@
           s.node.radius += 0.10;
           farm.dirty = true; this.markDirty(farm);
           this.player.biomass -= DIG_COST;
+          //  Growing a scoop removes soil exactly like carving a new one, so
+          //  it owes the same follow-up work. Dragging the tool hits this
+          //  branch far more often than the branch below, and skipping the
+          //  rebake left props standing on ground that no longer existed and
+          //  water asleep on a surface that had been dug away underneath it.
+          if (AF.Heap) AF.Heap.rebakeGround();
+          if (this.pruneFloatingProps) this.pruneFloatingProps(farm);
+          if (AF.PS) AF.PS.wakeNear(x, y, z, s.node.radius * 2.4);
           return s;
         }
         return null;
