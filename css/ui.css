@@ -40,7 +40,13 @@
 
   /* type */
   --mono:"SF Mono",ui-monospace,"Cascadia Mono","JetBrains Mono","Roboto Mono",Menlo,Consolas,monospace;
-  --sans:"Inter",system-ui,-apple-system,"Segoe UI",Roboto,sans-serif;
+  /*  Was Inter. Anything without an explicit font fell back to it, so
+      half the interface stayed on the old face while the tray and the
+      menu moved - the audit found Inter on the boot screen, the alerts,
+      the notifications, the pause veil, the stat pills and both
+      untouched overlays. Changing the root removes that in one place.  */
+  --sans:"Nunito Sans",system-ui,-apple-system,"Segoe UI",sans-serif;
+  --display:"Outfit",system-ui,sans-serif;
 
   /* geometry */
   --r:12px; --r2:9px; --r3:6px;
@@ -1076,3 +1082,157 @@ kbd{background:rgba(0,0,0,.35);border:1px solid rgba(255,255,255,.14);
 }
 #help .krow .kk{ min-width:auto; flex:0 0 auto; text-align:left; }
 #help .krow > span:last-child{ font-size:14px; color:var(--p-muted); }
+
+/* ==================================================================
+   THE SURFACES THE REDESIGN MISSED
+   ------------------------------------------------------------------
+   Found by measuring every panel's computed background rather than
+   looking: the selection card, the settings screen, the end screen,
+   the raid banner, the notifications, the pause veil and the debug
+   readout were all still on the old palette. They were simply never
+   opened while the tray and the menu were being rebuilt.
+   ================================================================== */
+
+/* ---- shared panel: settings and the end screen ride on this ---- */
+.panel-wide{
+  background:var(--p-surface); border:0; border-radius:24px;
+  box-shadow:0 10px 20px rgba(16,12,10,.28), 0 44px 90px rgba(16,12,10,.44);
+  color:var(--p-ink);
+}
+.panel-wide h2{
+  font-family:var(--display); font-weight:800; font-size:30px; letter-spacing:-.02em;
+  text-transform:none; color:var(--p-ink); margin:0 0 22px;
+}
+#settings.overlay, #endscreen.overlay{ background:rgba(28,24,20,.62); }
+#settings .panel-wide, #endscreen .panel-wide{ padding:36px 40px 32px; }
+#settings .big-btn, #endscreen .big-btn{
+  background:var(--p-food); border:0; border-radius:999px; color:#fff;
+  padding:15px 34px; font-family:var(--display); font-weight:700; font-size:16px;
+  letter-spacing:0; text-transform:none;
+  box-shadow:0 3px 6px rgba(46,90,55,.22), 0 12px 26px rgba(46,90,55,.24);
+}
+#settings .big-btn:hover, #endscreen .big-btn:hover{ background:#448a53; color:#fff; }
+
+/* ---- the end screen ---- */
+#endTitle{
+  font-family:var(--display); font-weight:800; font-size:38px; letter-spacing:-.02em;
+  color:var(--p-food-ink); margin:0 0 12px;
+}
+#endTitle.lose{ color:var(--p-short); }
+#endMsg{ font-size:16px; line-height:1.5; color:var(--p-muted); margin:0 0 6px; }
+.end-stats{ gap:8px; margin:24px 0 28px; }
+.end-stats div{
+  font-size:14px; color:var(--p-muted); background:var(--p-tile);
+  border-radius:12px; padding:11px 14px;
+}
+.end-stats b{ color:var(--p-ink); font-weight:700; font-family:var(--display); }
+
+/* ---- the selection card ---- */
+#selcard{
+  width:212px; padding:14px 16px 15px; border-radius:16px; border:0;
+  background:var(--p-surface); color:var(--p-ink);
+  box-shadow:0 3px 6px rgba(30,26,22,.14), 0 16px 38px rgba(30,26,22,.26);
+  font-family:var(--sans);
+}
+#selcard b, #selcard strong{ color:var(--p-ink); font-weight:700; font-family:var(--display); }
+#selcard em, #selcard .sub{ font-style:normal; color:var(--p-faint); }
+
+/* ---- the raid banner ---- */
+#alert{
+  background:var(--p-short); border:0; border-radius:999px; color:#fff;
+  padding:12px 26px; font-family:var(--display); font-weight:700; font-size:15px;
+  letter-spacing:.06em;
+  box-shadow:0 3px 6px rgba(120,50,36,.26), 0 14px 30px rgba(120,50,36,.30);
+}
+
+/* ---- notifications ---- */
+#notifications > *{
+  background:var(--p-surface); color:var(--p-ink); border:0; border-radius:14px;
+  padding:11px 16px; font-family:var(--sans); font-size:14px;
+  box-shadow:0 3px 6px rgba(30,26,22,.12), 0 14px 30px rgba(30,26,22,.22);
+}
+#notifications b, #notifications strong{ color:var(--p-ink); font-weight:700; }
+
+/* ---- paused ---- */
+#pauseveil{ background:rgba(28,24,20,.35); }
+#pauseveil span{
+  background:var(--p-surface); color:var(--p-ink); border-radius:999px;
+  padding:12px 30px; font-family:var(--display); font-weight:700; font-size:14px;
+  letter-spacing:.24em; text-shadow:none;
+  box-shadow:0 4px 10px rgba(16,12,10,.28), 0 20px 44px rgba(16,12,10,.34);
+}
+
+/* ---- the corner readout ---- */
+#stats{
+  font-family:var(--display); font-size:11px; font-weight:600;
+  color:rgba(251,250,247,.42); letter-spacing:.04em;
+}
+
+/* ---- pills carry the display face, not the page default ---- */
+.stat, .speedbtns, #dayBox{ font-family:var(--display); }
+
+/* ---- the settings rows ----
+   The panel went light but the controls inside it did not: the chosen
+   option stayed the old amber and the unchosen ones were pale text on
+   a pale card, close to invisible. Same pills the rest of the
+   interface uses.  */
+#settings .sys-row{
+  display:flex; align-items:center; gap:8px; flex-wrap:wrap;
+  padding:14px 0; border-bottom:1px solid var(--p-line);
+}
+#settings .sys-row:last-of-type{ border-bottom:0; }
+#settings .sys-row > label{
+  font-family:var(--display); font-weight:700; font-size:12px; letter-spacing:.1em;
+  text-transform:uppercase; color:var(--p-faint); min-width:86px; text-align:left;
+}
+#settings .mini-btn{
+  background:var(--p-sunk); border:0; border-radius:999px;
+  color:var(--p-muted); padding:9px 16px; cursor:pointer;
+  font-family:var(--display); font-weight:600; font-size:13px; letter-spacing:.02em;
+  transition:background .12s, color .12s;
+}
+#settings .mini-btn:hover{ background:#e6e3da; color:var(--p-ink); border:0; }
+#settings .mini-btn.on{ background:var(--p-ink); border:0; color:var(--p-surface); font-weight:700; }
+#settings .mini-btn:focus-visible{ outline:2px solid var(--p-ink); outline-offset:2px; }
+
+#settings .sys-row input[type=range]{
+  -webkit-appearance:none; appearance:none; flex:1; height:6px;
+  border-radius:999px; background:var(--p-sunk); outline:none;
+}
+#settings .sys-row input[type=range]::-webkit-slider-thumb{
+  -webkit-appearance:none; width:18px; height:18px; border-radius:999px;
+  background:var(--p-food); border:0; cursor:pointer;
+  box-shadow:0 1px 3px rgba(30,26,22,.28);
+}
+#settings .sys-row input[type=range]::-moz-range-thumb{
+  width:18px; height:18px; border-radius:999px; background:var(--p-food);
+  border:0; cursor:pointer;
+}
+
+/* ---- the counters must not breathe ----
+   tabular-nums only equalises the WIDTH OF A DIGIT; it does nothing
+   about the NUMBER of digits. Food going 99 -> 580 -> 1204 re-sized the
+   pill every time, and the rate badge appearing and disappearing shoved
+   the two pills beside it sideways. Every number gets a fixed slot wide
+   enough for the largest value it will hold, and the rate keeps its slot
+   whether or not it has anything in it.  */
+.stat{ font-variant-numeric:tabular-nums; }
+.stat b{
+  min-width:3.6ch; text-align:right; display:inline-block;
+  font-variant-numeric:tabular-nums;
+}
+.stat .rate{
+  /*  5 characters, because the rate runs to things like -42.2 and +12.4.
+      Sized at 3.4 it still nudged the row whenever the number went wide. */
+  min-width:5ch; text-align:left; display:inline-block;
+  font-variant-numeric:tabular-nums;
+}
+#dayBox b{
+  /*  3 characters - the day counter reaches three digits on a long run
+      and the pill was still growing by 6px when it did.  */
+  min-width:3ch; text-align:right; display:inline-block;
+  font-variant-numeric:tabular-nums;
+}
+/*  Costs on the tiles line up for the same reason - a two digit price
+    must not shift the label above it.  */
+#toolbar .tool em{ min-width:2.4ch; text-align:center; display:inline-block; }
