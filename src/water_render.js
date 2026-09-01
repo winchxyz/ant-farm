@@ -235,8 +235,15 @@
     '  float foam = clamp(th.g/max(th.r,1.0e-4),0.0,1.0);',
     '  col = mix(col, col*0.45+vec3(0.80,0.91,1.0)*0.55,',
     '            clamp(foam*1.1,0.0,0.62)*smoothstep(0.18,0.70,thick));',
+    '  //  PREMULTIPLIED. The composite blends with premul (src + dst*(1-a)),',
+    '  //  so the colour has to be scaled by its own coverage. It was not:',
+    '  //  at the feathered edge, where cov is around 0.1, the full water',
+    '  //  colour was ADDED on top of 90% of the sand. That is the dark oily',
+    '  //  halo that spread far past the pool - it appeared wherever the soft',
+    '  //  thickness splats left a trace, which is a long way outside the',
+    '  //  water itself.',
     '  float cov = smoothstep(0.008,0.075,th.r);',
-    '  oColor = vec4(col,cov);',
+    '  oColor = vec4(col*cov,cov);',
     '  oNormal = vec4(N*0.5+0.5,0.03);',
     '}'
   ].join('\n');
