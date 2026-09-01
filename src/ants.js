@@ -525,6 +525,28 @@
       var hx = f.half[0] - 0.45, hz = f.half[2] - 0.25;
       this.pos[0] = M.clamp(this.pos[0], f.center[0] - hx, f.center[0] + hx);
       this.pos[2] = M.clamp(this.pos[2], f.center[2] - hz, f.center[2] + hz);
+
+      //  Stones are solid for ants too. Surface movement clamped to the
+      //  glass and nothing else, so a forager walked straight through a
+      //  pebble on its way to a crumb. Pushed out along the line from the
+      //  stone's centre, which lets it round the obstacle instead of
+      //  sticking to it. Grass stays passable - an ant walks through a tuft.
+      var props = f.props;
+      if (props) {
+        var mySz = this.def.scale * this.sizeVar;
+        for (var pi = 0; pi < props.length; pi++) {
+          var pr = props[pi];
+          if (pr.kind === 'grass') continue;
+          var ox = this.pos[0] - pr.x, oz = this.pos[2] - pr.z;
+          var od = ox * ox + oz * oz;
+          if (od > 9) continue;
+          var need = pr.scale * 0.60 + mySz * 0.5;
+          if (od >= need * need || od < 1e-6) continue;
+          var ol = Math.sqrt(od);
+          this.pos[0] = pr.x + ox / ol * need;
+          this.pos[2] = pr.z + oz / ol * need;
+        }
+      }
       this.yaw = M.angleLerp(this.yaw, Math.atan2(dx, dz), Math.min(1, dt * 9));
       this.walk = M.damp(this.walk, 1, 10, dt);
       this.phase += speed * 3.2 * dt;
