@@ -91,6 +91,7 @@
     'in vec3 vEye; in float vRad, vSpd, vPack;',
     'uniform float uScale;',
     'uniform sampler2D uSurf;',
+    'uniform mat4 uProj;',
     'uniform vec2 uInvRes;',
     'out vec4 oThick;',
     'void main(){',
@@ -100,9 +101,10 @@
     '  vec3 e = vEye + vec3(c*vRad, sqrt(1.0-m)*vRad);',
     '  float dep = -e.z;',
     '  if(dep <= 0.0) discard;',
-    '  float surf = texture(uSurf, gl_FragCoord.xy*uInvRes).r;',
+    '  vec2 uv = gl_FragCoord.xy*uInvRes;',
+    '  float surf = texture(uSurf, uv).r;',
     '  //  a real pool is allowed a few particle diameters of body; anything',
-    '  //  further back than that is behind something and does not count',
+    '  //  further back than that is behind other water and does not count',
     '  if(surf > 0.0 && dep > surf + 2.2) discard;',
     '  float w = (1.0-m)*uScale;',
     '  oThick = vec4(w, w*clamp(vSpd*0.10,0.0,1.0), 0.0, 0.0);',
@@ -336,8 +338,30 @@
     if (!PS) return 0;
     var px = PS.px, py = PS.py, pz = PS.pz, alive = PS.alive, mat = PS.mat;
     var nbrN = PS.nbrN, rad = PS.rad, k = 0;
+    //  BURIED WATER IS NOT DRAWN.
+    //
+    //  Pour a lot of water and much of it soaks INTO the soil. Those
+    //  particles are inside solid ground, invisible by any honest account -
+    //  but the thickness pass had no depth test of any kind, so they kept
+    //  writing thickness at their screen position and the composite shaded
+    //  all the earth in front of them as though you were looking through
+    //  water. That is the wash around a flooded pit.
+    //
+    //  Testing it in the shader against the scene depth buffer does not
+    //  work: measured on a live tank with 2600 particles sealed inside
+    //  solid soil, that buffer reports something FARTHER away than the
+    //  water at those pixels, so the comparison never fires. The soil's
+    //  own distance field is the honest source, it is already on the CPU,
+    //  and it costs one lookup per particle.
+    //
+    //  Water in a tunnel or a chamber sits in open air (sdf > 0) and still
+    //  renders - only what is sealed inside earth is skipped.
+    var farm = AF.Game && AF.Game.activeFarm;
+    if (!farm && AF.Game && AF.Game.player) farm = AF.Game.player.farms[0];
+    var sdf = farm && farm.soilSDF ? farm : null;
     for (var i = 0; i < PS.MAX_RESIDENT; i++) {
       if (!alive[i] || mat[i] !== PS.MAT_WATER) continue;
+      if (sdf && sdf.soilSDF(px[i], py[i], pz[i]) < -0.12) continue;
       data[k] = px[i]; data[k + 1] = py[i]; data[k + 2] = pz[i];
       data[k + 3] = rad[i];
       data[k + 4] = 0;
