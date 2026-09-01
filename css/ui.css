@@ -991,3 +991,88 @@ kbd{background:rgba(0,0,0,.35);border:1px solid rgba(255,255,255,.14);
   #menu .menu-head::after{ display:none; }
   #menu #speciesList{ grid-template-columns:1fr; }
 }
+
+/* ==================================================================
+   THE TOOLTIP AND THE FIELD MANUAL
+   ------------------------------------------------------------------
+   Both were left on the old dark-brown card while everything around
+   them went light, so hovering any tool popped a panel from the
+   previous design straight over the new tray. They were simply
+   missed - the tray was restyled and these were not.
+   ================================================================== */
+#tip{
+  position:fixed; z-index:40; max-width:290px; padding:14px 16px 13px;
+  border-radius:16px; border:0;
+  background:var(--p-surface); color:var(--p-ink);
+  box-shadow:0 4px 10px rgba(30,26,22,.16), 0 20px 46px rgba(30,26,22,.30);
+  font-family:'Nunito Sans', system-ui, sans-serif;
+}
+#tip .tt{
+  display:flex; align-items:baseline; justify-content:space-between; gap:14px;
+  font-family:'Outfit', system-ui, sans-serif; font-weight:700; font-size:16px;
+  color:var(--p-ink); margin-bottom:7px;
+}
+#tip .tt em{
+  font-style:normal; font-weight:700; font-size:13px; color:var(--p-dirt);
+  font-variant-numeric:tabular-nums; white-space:nowrap;
+}
+#tip .td{ font-size:13.5px; line-height:1.5; color:var(--p-muted); }
+#tip .tk{
+  font-size:12.5px; color:var(--p-faint); margin-top:11px;
+  padding-top:10px; border-top:1px solid var(--p-line);
+}
+#tip b, #tip strong{ color:var(--p-ink); font-weight:700; }
+
+/* ---- the F1 manual ---- */
+#help.overlay{ background:rgba(28,24,20,.62); }
+#help .panel-wide{
+  background:var(--p-surface); border:0; border-radius:24px;
+  padding:38px 42px 32px; max-width:900px; width:min(92vw,900px);
+  max-height:86vh; overflow:auto;
+  box-shadow:0 10px 20px rgba(16,12,10,.28), 0 44px 90px rgba(16,12,10,.44);
+  font-family:'Nunito Sans', system-ui, sans-serif;
+}
+#help h2{
+  font-family:'Outfit', system-ui, sans-serif; font-weight:800; font-size:34px;
+  letter-spacing:-.02em; text-transform:none; color:var(--p-ink);
+  margin:0 0 26px; text-align:left;
+}
+#help .help-grid{ gap:26px 40px; margin-bottom:30px; }
+#help .help-sec h4{
+  font-family:'Outfit', system-ui, sans-serif; font-weight:700; font-size:12px;
+  letter-spacing:.12em; text-transform:uppercase; color:var(--p-faint);
+  margin:0 0 10px;
+}
+#help .help-sec p,
+#help .help-sec li{ font-size:14.5px; line-height:1.6; color:var(--p-muted); }
+#help .help-sec li{ padding-left:16px; margin-bottom:5px; }
+#help .help-sec li::before{ content:""; position:absolute; left:0; top:.62em;
+  width:5px; height:5px; border-radius:999px; background:var(--p-food); }
+#help .help-sec b, #help .help-sec strong{ color:var(--p-ink); font-weight:700; }
+#help .big-btn{
+  background:var(--p-food); border:0; border-radius:999px; color:#fff;
+  padding:15px 34px; font-family:'Outfit', system-ui, sans-serif;
+  font-weight:700; font-size:16px; letter-spacing:0; text-transform:none;
+  box-shadow:0 3px 6px rgba(46,90,55,.22), 0 12px 26px rgba(46,90,55,.24);
+}
+#help .big-btn:hover{ background:#448a53; color:#fff; }
+
+/*  The hint strip keeps one size, so naming a tool cannot shove the
+    layout sideways while the pointer is moving along the tray.  */
+#ctxhint{ min-width:430px; min-height:38px; display:flex; align-items:center;
+  justify-content:center; }
+
+/*  The key caps in the manual were dark chips carrying dark text on the
+    new light card - unreadable. Same pills the rest of the interface
+    uses, and the row gets room so the label is not jammed against them. */
+#help kbd{
+  display:inline-block; font-family:'Outfit', system-ui, sans-serif;
+  font-weight:700; font-size:12px; letter-spacing:.02em;
+  background:var(--p-sunk); border:0; border-radius:8px;
+  color:var(--p-ink); padding:5px 10px; box-shadow:none;
+}
+#help .krow{
+  display:flex; align-items:baseline; gap:14px; margin-bottom:7px;
+}
+#help .krow .kk{ min-width:auto; flex:0 0 auto; text-align:left; }
+#help .krow > span:last-child{ font-size:14px; color:var(--p-muted); }

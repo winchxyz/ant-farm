@@ -152,7 +152,7 @@
       '<li>You have one glass tank and one queen. Everything else grows from there.</li>' +
       '<li><b>Workers</b> dig and haul. <b>Foragers</b> fetch food from the surface. <b>Soldiers</b> fight.</li>' +
       '<li>Digging costs <b>dirt</b> — and digging also <b>gives dirt back</b>, so you rarely run dry.</li>' +
-      '<li>New ants cost <b>Food ◆</b>. Foragers keep it topped up on their own.</li>' +
+      '<li>New ants cost <b>food</b>. Foragers keep it topped up on their own.</li>' +
       '<li>There is no way to lose except letting the queen die. Take your time.</li>' +
       '</ul></div>' +
 
@@ -414,9 +414,30 @@
 
   //  One contextual line under the dock: the thing you are pointing at, or
   //  the current instruction. Never both, never a wall of hints.
+  //  HOLD THE LINE FOR A MOMENT.
+  //
+  //  mouseenter set the tool name, mouseleave cleared it, and clearing falls
+  //  through to the camera-keys line. Sliding the pointer across the tray
+  //  crosses a 7px gap between every pair of tiles, which fires
+  //  leave-then-enter and flipped the strip to "Wheel zoom / Right-drag
+  //  orbit" and straight back - a hard flicker between two different banners
+  //  on every tile boundary.
+  //
+  //  Clearing is deferred by a beat and cancelled by the next tile, so
+  //  crossing a gap reads as one continuous hover. Naming a tool is still
+  //  instant - only the return to the default line waits.
   UI.caption = function (name, cost) {
-    UI.capOverride = name ? (name + (cost ? '  <em>' + cost + '</em>' : '')) : null;
-    UI.updateHint(UI.game);
+    if (UI.capTimer) { clearTimeout(UI.capTimer); UI.capTimer = 0; }
+    if (name) {
+      UI.capOverride = name + (cost ? '  <em>' + cost + '</em>' : '');
+      UI.updateHint(UI.game);
+      return;
+    }
+    UI.capTimer = setTimeout(function () {
+      UI.capTimer = 0;
+      UI.capOverride = null;
+      UI.updateHint(UI.game);
+    }, 140);
   };
 
 
