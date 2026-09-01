@@ -1176,14 +1176,21 @@ kbd{background:rgba(0,0,0,.35);border:1px solid rgba(255,255,255,.14);
    option stayed the old amber and the unchosen ones were pale text on
    a pale card, close to invisible. Same pills the rest of the
    interface uses.  */
+/*  The label sits OUT of the flex flow, and the row is padded to clear
+    it. In flow it only reserved space on the first line, so when the
+    GAME row ran out of width its fourth button wrapped and landed under
+    the label instead of under the other buttons - START OVER hanging off
+    to the left on its own line.  */
 #settings .sys-row{
-  display:flex; align-items:center; gap:8px; flex-wrap:wrap;
-  padding:14px 0; border-bottom:1px solid var(--p-line);
+  position:relative; display:flex; align-items:center; gap:8px; flex-wrap:wrap;
+  padding:14px 0 14px 98px; border-bottom:1px solid var(--p-line);
+  row-gap:8px;
 }
 #settings .sys-row:last-of-type{ border-bottom:0; }
 #settings .sys-row > label{
+  position:absolute; left:0; top:20px;
   font-family:var(--display); font-weight:700; font-size:12px; letter-spacing:.1em;
-  text-transform:uppercase; color:var(--p-faint); min-width:86px; text-align:left;
+  text-transform:uppercase; color:var(--p-faint); text-align:left;
 }
 #settings .mini-btn{
   background:var(--p-sunk); border:0; border-radius:999px;
