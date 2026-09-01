@@ -1,0 +1,75 @@
+FORMICARIUM :: DEEP COLONY
+Copyright (c) 2026 winchxyz. All rights reserved.
+
+
+PROPRIETARY LICENSE - NO REDISTRIBUTION, NO COMMERCIAL USE
+
+This software and all of its contents - source code, shaders, generated
+assets, images and documentation (together, "the Work") - are the exclusive
+property of the copyright holder. The Work is made publicly readable for the
+purposes of play and inspection only. Publication does not place the Work in
+the public domain and does not grant any licence beyond the one written below.
+
+
+1. WHAT YOU MAY DO
+
+   a. Play the Work, including the copy hosted by the copyright holder.
+
+   b. Read the source code, and run your own local copy of it, for private,
+      personal, non-commercial purposes: to learn from it, to evaluate it, or
+      to play it offline.
+
+   c. Modify your own local copy for your own private use.
+
+   d. Quote short excerpts of the source code with attribution, for the
+      purposes of discussion, review, teaching or criticism.
+
+
+2. WHAT YOU MAY NOT DO
+
+   a. REDISTRIBUTION. You may not distribute, publish, upload, mirror, host,
+      bundle, sell, rent, lend or otherwise make the Work - in whole or in
+      substantial part, original or modified - available to any third party.
+      This includes republishing it on another website, app store, game
+      portal, package registry or asset marketplace.
+
+   b. COMMERCIAL USE. You may not use the Work, in whole or in substantial
+      part, for any commercial purpose. This includes selling it, charging
+      for access to it, bundling it with a paid product or service, using it
+      in advertising, monetising a deployment of it, or using it to train or
+      fine-tune a model that is offered commercially.
+
+   c. SUBLICENSING. You may not grant anyone else rights to the Work, and you
+      may not remove or alter this licence or the copyright notice.
+
+
+3. FORKING ON GITHUB
+
+   The Work is hosted in a public repository. Under the GitHub Terms of
+   Service, publishing a public repository permits other GitHub users to view
+   and fork it within GitHub. That platform-level permission is acknowledged
+   and is limited to exactly that: viewing and forking on GitHub. It does not
+   grant redistribution outside GitHub, and it does not grant any commercial
+   use. All other terms of this licence apply to a fork.
+
+
+4. NO WARRANTY
+
+   THE WORK IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+   IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+   FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL
+   THE COPYRIGHT HOLDER BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER LIABILITY,
+   WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF
+   OR IN CONNECTION WITH THE WORK OR THE USE OR OTHER DEALINGS IN THE WORK.
+
+
+5. TERMINATION
+
+   Any use of the Work outside the permissions in section 1 terminates this
+   licence automatically.
+
+
+6. OTHER ARRANGEMENTS
+
+   Permission beyond the scope of this licence - including any commercial use
+   or any redistribution - may be requested from the copyright holder.
