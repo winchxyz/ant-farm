@@ -215,6 +215,16 @@
       e.addEventListener('mousedown', function (ev) { UI.consumeClick = true; ev.stopPropagation(); });
     });
 
+    //  The three stat chips carried Unicode too - a diamond for food, a
+    //  shaded block for dirt, a six-pointed star for ants. Same drawn marks
+    //  the tray uses, so the whole screen speaks one language.
+    var chips = { sFood: 'pantry', sDirt: 'shovel', sPop: 'worker' };
+    Object.keys(chips).forEach(function (id) {
+      var host = $(id);
+      var slot = host && host.querySelector('.ic');
+      if (slot && AF.icon) slot.innerHTML = AF.icon(chips[id]);
+    });
+
     $('hud').classList.remove('hidden');
   };
 
@@ -233,9 +243,25 @@
     UI.castCards = [];
     UI.pourBtns = [];
 
+    var tabs = el('div', 'tabs');
+    bar.appendChild(tabs);
+    var pages = el('div', 'tpages');
+    bar.appendChild(pages);
+
+    //  GROUPS ARE PAGES NOW.
+    //
+    //  The label passed here was thrown away, and all five groups were laid
+    //  out end to end - eighteen identical buttons in one strip, where
+    //  pouring sugar, carving soil, commissioning a room, releasing a
+    //  predator and raising a caste all looked like the same kind of act.
+    //  Each group is a page now, one shown at a time, picked from a
+    //  segmented switch above the tray.
+    UI.tgroups = [];
     function group(label) {
       var row = el('div', 'tgroup');
-      bar.appendChild(row);
+      row.dataset.group = label;
+      pages.appendChild(row);
+      UI.tgroups.push({ label: label, row: row });
       return row;
     }
     //  Icon + cost only. The name goes in the caption strip under the dock,
@@ -245,7 +271,12 @@
       var b = el('button', 'tool ' + cls);
       //  Always label the button. Icon-only was compact and unreadable - you
       //  cannot tell a Pantry from a Waste Pit by silhouette.
-      b.innerHTML = '<i>' + icon + '</i><span>' + name + '</span>' +
+      //  A drawn mark if one exists for this tool, otherwise the old
+      //  character. icon may be a key into AF.icon (a drawn silhouette) or,
+      //  for anything not yet drawn, a literal glyph.
+      var mark = (AF.hasIcon && AF.hasIcon(icon)) ? AF.icon(icon)
+        : '<i>' + icon + '</i>';
+      b.innerHTML = mark + '<span>' + name + '</span>' +
         (cost ? '<em>' + cost + '</em>' : '') +
         '<b class="q hidden">0</b><u class="have"></u>';
       b.onclick = onClick;
@@ -260,7 +291,7 @@
     var fr = group('Feed');
     Object.keys(AF.Game.POUR).forEach(function (k) {
       var d = AF.Game.POUR[k];
-      var b = tool(fr, 'feed', d.icon, d.name, '', {
+      var b = tool(fr, 'feed', k, d.name, '', {
         title: d.name, cost: 'free', desc: d.desc,
         keys: 'Click the soil to pour · Shift keeps pouring · Esc to stop'
       }, function () {
@@ -278,7 +309,7 @@
     var dr = group('Dig');
     //  The shovel. It carves the soil itself rather than commissioning a
     //  room, so it sits with the digging tools but is not a chamber.
-    UI.digBtn = tool(dr, 'dig', '◢', 'Shovel', '▤' + AF.Game.DIG.cost, {
+    UI.digBtn = tool(dr, 'dig', 'shovel', 'Shovel', '▤' + AF.Game.DIG.cost, {
       title: 'Shovel', cost: '▤ ' + AF.Game.DIG.cost + ' dirt per scoop',
       desc: 'Dig the soil away yourself. Hold and drag to carve a trench.' +
         '<br><br>Break into a tunnel and the colony will stop what it is doing and fill it back in.',
@@ -289,11 +320,14 @@
       game.audio.play('click');
     });
 
+    // ---- build ----
+    var br = group('Build');
     W.BUILDABLE.forEach(function (type, i) {
       var ch = W.CHAMBERS[type];
       var cost = Math.round((AF.Game.COST.tunnel + ch.cost) * 0.5);
       var key = i + 1;
-      var b = tool(dr, 'dig', ch.icon || '•', ch.name, '▤' + cost, {
+      var b = tool(br, 'dig', (AF.ICON_CHAMBER && AF.ICON_CHAMBER[type]) || 'tunnel',
+        ch.name, '' + cost, {
         title: ch.name, cost: '▤ ' + cost + ' dirt', desc: ch.desc,
         keys: 'Press ' + key + ' · then click · Shift keeps digging'
       }, function () { game.setBuild(game.buildType === type ? -1 : type); });
@@ -304,11 +338,11 @@
     //  Stocking the tank. These are not units the player commands - they are
     //  animals put in to watch the colony deal with, which is the whole point
     //  of an ant farm.
-    var lr = group('Life');
+    var lr = group('Release');
     UI.spawnBtns = [];
     Object.keys(AF.Game.BESTIARY).forEach(function (k) {
       var cd = AF.Game.BESTIARY[k];
-      var b = tool(lr, 'life', cd.icon, cd.name, '\u25a4' + cd.cost, {
+      var b = tool(lr, 'life', k, cd.name, '\u25a4' + cd.cost, {
         title: cd.name,
         cost: '\u25a4 ' + cd.cost + ' dirt',
         desc: cd.desc + '<br><br>Health ' + cd.hp + ' \u00b7 Bite ' + cd.dmg +
@@ -325,7 +359,7 @@
     var ar = group('Raise');
     A.PLAYABLE.forEach(function (caste) {
       var cs = A.CASTES[caste];
-      var b = tool(ar, 'raise', cs.glyph, cs.name, '◆' + cs.food, function () {
+      var b = tool(ar, 'raise', cs.key.toLowerCase(), cs.name, '' + cs.food, function () {
         return {
           title: cs.name, cost: '◆ ' + cs.food + ' food',
           desc: cs.desc + '<br><br>Health ' + cs.hp + ' · Bite ' + cs.dmg,
@@ -339,6 +373,28 @@
         game.audio.play('deny');
       };
       UI.castCards.push({ e: b, caste: caste, q: b.querySelector('.q'), have: b.querySelector('.have') });
+    });
+
+    //  One tab per group. Build opens first: it is what a new colony needs
+    //  and the group a player returns to most.
+    UI.tgroups.forEach(function (g) {
+      var t = el('button', 'tab');
+      t.textContent = g.label;
+      t.onclick = function () { UI.showGroup(g.label); game.audio.play('click'); };
+      tabs.appendChild(t);
+      g.tab = t;
+    });
+    UI.showGroup('Build');
+  };
+
+  //  Show one group, hide the rest. Nothing is destroyed, so a tool keeps
+  //  its selected state and its queue badge while its group is off screen.
+  UI.showGroup = function (label) {
+    if (!UI.tgroups) return;
+    UI.tgroups.forEach(function (g) {
+      var on = g.label === label;
+      g.row.classList.toggle('on', on);
+      if (g.tab) g.tab.classList.toggle('on', on);
     });
   };
 

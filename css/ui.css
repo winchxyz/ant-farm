@@ -534,3 +534,358 @@ kbd{background:rgba(0,0,0,.35);border:1px solid rgba(255,255,255,.14);
 
 /* the stats readout is two lines now, and needs to keep its newline */
 #stats{white-space:pre;text-align:right;line-height:1.5;color:rgba(243,230,203,.34)}
+
+/* ==================================================================
+   THE TRAY  -  light, grouped, drawn
+   ------------------------------------------------------------------
+   The old tray was eighteen identical brown buttons in one full-width
+   strip: no hierarchy, no grouping, and icons that were Unicode
+   characters borrowed for their shape. It read as a template.
+
+   This is the same markup restyled and regrouped. Light against the
+   dark tank rather than brown on brown, one group shown at a time
+   behind a segmented switch, and generous enough that a name and a
+   cost both fit without cramping.
+   ================================================================== */
+:root{
+  --p-surface:#fbfaf7;
+  --p-raised:#ffffff;
+  --p-sunk:#f0eee8;
+  --p-tile:#f4f2ec;
+  --p-ink:#2c2a26;
+  --p-muted:#7c7a73;
+  --p-faint:#a09d94;
+  --p-line:#eae7df;
+  --p-food:#4e9b5f;
+  --p-food-bg:#e9f3ea;
+  --p-food-ink:#2f6b3c;
+  --p-dirt:#d99a3e;
+  --p-dirt-bg:#f4ece0;
+  --p-short:#c05b45;
+  --p-lift:0 3px 6px rgba(30,26,22,.10), 0 18px 44px rgba(30,26,22,.28);
+}
+
+#toolbar{
+  display:flex; flex-direction:column; gap:14px;
+  width:756px; margin:0 auto; padding:14px;
+  background:var(--p-surface); border-radius:22px; border:0;
+  box-shadow:var(--p-lift);
+  font-family:'Nunito Sans', system-ui, sans-serif;
+}
+
+/* the group switch */
+#toolbar .tabs{
+  display:flex; gap:5px;
+  background:var(--p-sunk); border-radius:14px; padding:5px;
+}
+#toolbar .tab{
+  flex:1 1 0; border:0; cursor:pointer; padding:10px 0; border-radius:10px;
+  background:transparent; color:var(--p-muted);
+  font-family:'Outfit', system-ui, sans-serif; font-weight:600; font-size:14px;
+  transition:background .12s, color .12s;
+}
+#toolbar .tab:hover{ color:var(--p-ink); }
+#toolbar .tab.on{
+  background:var(--p-surface); color:var(--p-ink); font-weight:700;
+  box-shadow:0 1px 2px rgba(30,26,22,.10), 0 3px 8px rgba(30,26,22,.10);
+}
+#toolbar .tab:focus-visible{ outline:2px solid var(--p-ink); outline-offset:2px; }
+
+/* one group at a time */
+#toolbar .tpages{ display:block; }
+#toolbar .tgroup{ display:none; grid-template-columns:repeat(6,minmax(0,1fr)); gap:8px; }
+#toolbar .tgroup.on{ display:grid; }
+
+/* the tiles */
+#toolbar .tool{
+  position:relative; display:flex; flex-direction:column;
+  align-items:center; justify-content:center; gap:7px;
+  width:auto; min-height:86px; padding:14px 8px 12px;
+  background:var(--p-tile); border:0; border-radius:14px; cursor:pointer;
+  color:var(--p-ink); transition:background .12s, box-shadow .12s, transform .12s;
+}
+#toolbar .tool:hover{ background:#eeebe3; transform:translateY(-2px); }
+#toolbar .tool:active{ transform:translateY(0); }
+#toolbar .tool:focus-visible{ outline:2px solid var(--p-ink); outline-offset:2px; }
+#toolbar .tool .ic{ width:28px; height:28px; display:block; color:var(--p-ink); }
+#toolbar .tool i{ font-style:normal; font-size:22px; line-height:1; color:var(--p-ink); }
+#toolbar .tool span{
+  font-family:'Outfit', system-ui, sans-serif; font-weight:600; font-size:13px;
+  line-height:1.15; color:var(--p-ink); text-align:center;
+}
+#toolbar .tool em{
+  position:static; font-style:normal; font-weight:700; font-size:12px;
+  color:var(--p-muted); font-variant-numeric:tabular-nums;
+}
+
+/* chosen */
+#toolbar .tool.on{
+  background:var(--p-food-bg); box-shadow:inset 0 0 0 2.5px var(--p-food);
+}
+#toolbar .tool.on .ic,
+#toolbar .tool.on i,
+#toolbar .tool.on span{ color:var(--p-food-ink); }
+#toolbar .tool.on span{ font-weight:700; }
+#toolbar .tool.on em{ color:var(--p-food); }
+
+/* cannot afford it */
+#toolbar .tool.poor{ opacity:.45; filter:none; }
+#toolbar .tool.poor em{ color:var(--p-short); }
+
+/* the queue badge and the owned count */
+#toolbar .tool .q{
+  position:absolute; top:-6px; right:-6px; min-width:22px; height:22px;
+  border-radius:999px; background:var(--p-ink); color:var(--p-surface);
+  font-family:'Outfit', system-ui, sans-serif; font-weight:700; font-size:11px;
+  display:flex; align-items:center; justify-content:center; padding:0 6px;
+  box-shadow:0 2px 6px rgba(30,26,22,.30);
+}
+#toolbar .tool .have{
+  position:absolute; top:7px; left:9px; text-decoration:none;
+  font-family:'Outfit', system-ui, sans-serif; font-weight:700; font-size:11px;
+  color:var(--p-faint); font-variant-numeric:tabular-nums;
+}
+
+/* ==================================================================
+   THE REST OF THE HUD  -  brought onto the same light system
+   ------------------------------------------------------------------
+   With the tray light and the top bar still dark brown, the screen
+   read as two interfaces from different games. Same tokens here:
+   soft white pills on the dark tank, one accent per resource, and
+   numbers in Outfit so they line up.
+   ================================================================== */
+#bar{ gap:12px; }
+
+.stat{
+  position:relative; display:flex; align-items:center; gap:11px;
+  padding:11px 20px 11px 12px; border-radius:999px;
+  background:var(--p-surface); border:0;
+  box-shadow:0 2px 4px rgba(30,26,22,.10), 0 10px 26px rgba(30,26,22,.20);
+}
+.stat .ic{
+  width:30px; height:30px; border-radius:999px; display:grid; place-items:center;
+  background:var(--p-sunk); color:var(--p-muted); font-size:0;
+}
+.stat .ic svg{ width:17px; height:17px; }
+#sFood .ic{ background:var(--p-food-bg); color:var(--p-food); }
+#sDirt .ic{ background:var(--p-dirt-bg); color:#b07c37; }
+#sPop  .ic{ background:#fdeee9; color:var(--p-short); }
+
+.stat b{
+  font-family:'Outfit', system-ui, sans-serif; font-weight:700; font-size:21px;
+  color:var(--p-ink); font-variant-numeric:tabular-nums; letter-spacing:-.01em;
+}
+.stat span{
+  font-family:'Outfit', system-ui, sans-serif; font-size:10px; font-weight:700;
+  letter-spacing:.13em; text-transform:uppercase; color:var(--p-faint);
+}
+.stat .rate{
+  position:static; font-style:normal; font-weight:700; font-size:11px;
+  color:var(--p-food); font-variant-numeric:tabular-nums;
+}
+.stat .rate.neg{ color:var(--p-short); }
+.stat.flash{ background:#fff; box-shadow:0 0 0 2.5px var(--p-food), 0 10px 26px rgba(30,26,22,.20); }
+
+#dayBox{
+  display:flex; align-items:center; gap:7px;
+  padding:11px 20px; border-radius:999px; background:var(--p-surface);
+  box-shadow:0 2px 4px rgba(30,26,22,.10), 0 10px 26px rgba(30,26,22,.20);
+  font-family:'Outfit', system-ui, sans-serif; font-weight:600; font-size:14px;
+  letter-spacing:.1em; text-transform:uppercase; color:var(--p-faint); border:0;
+}
+#dayBox b{ font-size:18px; font-weight:700; color:var(--p-ink); font-variant-numeric:tabular-nums; }
+
+.speedbtns{
+  display:flex; gap:4px; padding:6px; border-radius:999px;
+  background:var(--p-surface);
+  box-shadow:0 2px 4px rgba(30,26,22,.10), 0 10px 26px rgba(30,26,22,.20);
+}
+.speedbtns button{
+  width:36px; height:36px; border:0; border-radius:999px; cursor:pointer;
+  background:transparent; color:var(--p-muted);
+  font-family:'Outfit', system-ui, sans-serif; font-weight:700; font-size:12px;
+  display:grid; place-items:center; transition:background .12s, color .12s;
+}
+.speedbtns button:hover{ color:var(--p-ink); background:var(--p-sunk); }
+.speedbtns button.on{ background:var(--p-ink); color:var(--p-surface); }
+.speedbtns button:focus-visible{ outline:2px solid var(--p-surface); outline-offset:2px; }
+
+#goal{
+  padding:10px 18px; border-radius:999px; background:rgba(251,250,247,.92);
+  box-shadow:0 2px 4px rgba(30,26,22,.10), 0 10px 26px rgba(30,26,22,.18);
+  font-size:14px; color:var(--p-ink); border:0;
+}
+#goal span{ color:var(--p-ink); }
+
+/* the line under the tray: one instruction, on the light card */
+#ctxhint{
+  margin:0 auto 10px; max-width:756px; padding:9px 18px; border-radius:999px;
+  background:rgba(251,250,247,.94); border:0; text-align:center;
+  font-family:'Nunito Sans', system-ui, sans-serif; font-size:14px; color:var(--p-muted);
+  box-shadow:0 2px 4px rgba(30,26,22,.10), 0 10px 26px rgba(30,26,22,.18);
+}
+#ctxhint b, #ctxhint strong{ color:var(--p-ink); font-weight:700; }
+#ctxhint em{ font-style:normal; font-weight:700; color:var(--p-food); }
+
+/* ==================================================================
+   THE MENU  -  split
+   ------------------------------------------------------------------
+   The old menu was two dark-brown rounded cards side by side with an
+   orange gradient button under them: the same template as the tray,
+   and the first thing anybody sees.
+
+   Split now. The title holds a dark panel down the left, the choices
+   sit on light paper to the right, and the primary action is a solid
+   green pill rather than a glowing gradient. No markup changed - the
+   existing menu-head / menu-cols / menu-foot blocks are placed into a
+   grid.
+   ================================================================== */
+#menu.overlay{
+  background:var(--p-surface);
+  font-family:'Nunito Sans', system-ui, sans-serif;
+}
+#menu .menu-wrap{
+  display:grid; grid-template-columns:minmax(320px,38%) 1fr;
+  gap:0; width:100%; max-width:none; height:100%; margin:0; padding:0;
+  align-items:stretch;
+}
+
+/* left: the title, on the dark of the tank */
+#menu .menu-head{
+  grid-column:1; grid-row:1 / span 3;
+  display:flex; flex-direction:column; justify-content:flex-end;
+  background:linear-gradient(160deg,#3a3129 0%,#241d16 62%,#1a1511 100%);
+  padding:56px 48px 52px; margin:0; text-align:left;
+}
+#menu .logo{ display:block; margin:0; }
+#menu .logo-mark{ display:none; }
+#menu .menu-head h1{
+  font-family:'Outfit', system-ui, sans-serif; font-weight:800; font-size:54px;
+  line-height:1; letter-spacing:-.02em; color:var(--p-surface); margin:0 0 10px;
+}
+#menu .menu-head h2{
+  font-family:'Outfit', system-ui, sans-serif; font-weight:700; font-size:12px;
+  letter-spacing:.4em; color:var(--p-dirt); margin:0;
+}
+#menu .tagline{
+  color:rgba(251,250,247,.72); font-size:18px; line-height:1.45;
+  margin-top:20px; letter-spacing:0; max-width:30ch;
+}
+
+/* right: the choosing */
+#menu .menu-cols,
+#menu .menu-cols.two{
+  grid-column:2; grid-row:1;
+  display:grid; grid-template-columns:1fr 1fr; gap:22px;
+  padding:52px 56px 0; align-content:start;
+}
+#menu .menu-card{
+  background:transparent; border:0; border-radius:0; padding:0;
+  box-shadow:none;
+}
+#menu .menu-card h3{
+  font-family:'Outfit', system-ui, sans-serif; font-weight:700; font-size:13px;
+  letter-spacing:.12em; text-transform:uppercase; color:var(--p-faint);
+  margin:0 0 14px; display:block;
+}
+#menu .chooser{ display:flex; flex-direction:column; gap:8px; max-height:none; overflow:visible; }
+#menu .small-chooser{ flex-direction:row; flex-wrap:wrap; gap:8px; }
+
+#menu .choice{
+  background:var(--p-tile); border:0; border-radius:16px; padding:15px 17px 14px;
+  cursor:pointer; transition:background .12s, box-shadow .12s;
+}
+#menu .choice:hover{ background:#eeebe3; }
+#menu .choice.on{
+  background:var(--p-food-bg); box-shadow:inset 0 0 0 2.5px var(--p-food);
+}
+#menu .choice .cn{
+  display:flex; align-items:center; gap:10px;
+  font-family:'Outfit', system-ui, sans-serif; font-weight:700; font-size:19px;
+  color:var(--p-ink); margin-bottom:5px;
+}
+#menu .choice.on .cn{ color:var(--p-food-ink); }
+#menu .choice .swatch{
+  width:12px; height:12px; border-radius:999px; display:inline-block; flex:0 0 auto;
+}
+#menu .choice .perk,
+#menu .choice .cd{
+  font-size:14px; line-height:1.4; color:var(--p-muted);
+}
+#menu .choice.on .perk,
+#menu .choice.on .cd{ color:#4d6b53; }
+
+/* graphics: pills, not cards */
+#menu .small-chooser .choice{
+  padding:9px 18px; border-radius:999px; background:var(--p-sunk);
+}
+#menu .small-chooser .choice .cn{
+  font-size:14px; font-weight:600; margin:0; color:var(--p-muted);
+}
+#menu .small-chooser .choice.on{ background:var(--p-ink); box-shadow:none; }
+#menu .small-chooser .choice.on .cn{ color:var(--p-surface); }
+
+/* the actions */
+#menu .menu-foot{
+  grid-column:2; grid-row:2; align-self:end;
+  display:flex; gap:14px; justify-content:flex-start; align-items:center;
+  padding:36px 56px 0; margin:0; flex-wrap:wrap;
+}
+#menu .big-btn{
+  background:var(--p-food); border:0; border-radius:999px;
+  color:#fff; padding:18px 40px;
+  font-family:'Outfit', system-ui, sans-serif; font-weight:700; font-size:17px;
+  letter-spacing:0; text-transform:none; cursor:pointer;
+  box-shadow:0 3px 6px rgba(46,90,55,.22), 0 12px 26px rgba(46,90,55,.24);
+  transition:background .12s, transform .12s;
+}
+#menu .big-btn:hover{ background:#448a53; color:#fff; transform:translateY(-1px); box-shadow:0 4px 8px rgba(46,90,55,.26), 0 16px 32px rgba(46,90,55,.28); }
+#menu .ghost-btn{
+  background:var(--p-sunk); border:0; border-radius:999px; color:#5f5d57;
+  padding:15px 24px;
+  font-family:'Outfit', system-ui, sans-serif; font-weight:600; font-size:15px;
+  letter-spacing:0; text-transform:none; cursor:pointer; transition:background .12s, color .12s;
+}
+#menu .ghost-btn:hover{ background:#e6e3da; color:var(--p-ink); border:0; }
+#menu .big-btn:focus-visible,
+#menu .ghost-btn:focus-visible,
+#menu .choice:focus-visible{ outline:2px solid var(--p-ink); outline-offset:3px; }
+
+#menu .credit{
+  grid-column:2; grid-row:3; align-self:end;
+  padding:26px 56px 30px; margin:0; text-align:left;
+  color:var(--p-faint); font-size:12px; letter-spacing:.06em; font-family:inherit;
+}
+
+@media (max-width:900px){
+  #menu .menu-wrap{ grid-template-columns:1fr; height:auto; }
+  #menu .menu-head{ grid-column:1; grid-row:1; padding:40px 28px 34px; }
+  #menu .menu-cols, #menu .menu-cols.two{ grid-column:1; grid-row:2; grid-template-columns:1fr; padding:32px 28px 0; }
+  #menu .menu-foot{ grid-column:1; grid-row:3; padding:26px 28px 0; }
+  #menu .credit{ grid-column:1; grid-row:4; padding:20px 28px 26px; }
+  #menu .menu-head h1{ font-size:40px; }
+}
+
+/*  The old menu hid every species' one-line perk on a short viewport
+    because six cards plus text did not fit. The split layout gives the
+    choices their own scrolling column, so the line stays - it is the only
+    thing that tells the six species apart.  */
+@media (max-height:760px){
+  #menu .choice .perk{ display:block; }
+  #menu #speciesList .choice{ padding:12px 15px 11px; }
+  #menu .menu-head h1{ font-size:42px; }
+}
+
+/*  Only the choosing column scrolls. The wrap itself stays exactly one
+    screen tall, so Begin the colony is always on screen - it went below
+    the fold on a short window when the whole page was allowed to grow.  */
+#menu .menu-wrap{ grid-template-rows:1fr auto auto; height:100%; overflow:hidden; }
+#menu .menu-cols, #menu .menu-cols.two{ overflow:auto; min-height:0; padding-bottom:20px; }
+
+/* ---- the boot screen, same system ---- */
+#boot{ background:linear-gradient(160deg,#3a3129 0%,#241d16 62%,#1a1511 100%); }
+#boot .logo h1{ font-family:'Outfit', system-ui, sans-serif; font-weight:800; color:var(--p-surface); }
+#boot .logo h2{ font-family:'Outfit', system-ui, sans-serif; font-weight:700; color:var(--p-dirt); }
+#bootBar{ background:rgba(251,250,247,.16); }
+#bootBar > i, #bootBar span, #bootFill{ background:var(--p-food); }
+#bootMsg{ font-family:'Nunito Sans', system-ui, sans-serif; color:rgba(251,250,247,.55); letter-spacing:.06em; }
