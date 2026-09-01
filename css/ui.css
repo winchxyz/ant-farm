@@ -566,8 +566,14 @@ kbd{background:rgba(0,0,0,.35);border:1px solid rgba(255,255,255,.14);
 }
 
 #toolbar{
-  display:flex; flex-direction:column; gap:14px;
-  width:756px; margin:0 auto; padding:14px;
+  /*  ARITHMETIC, NOT GUESSWORK.
+      Six tiles at 116 with 8px gaps needed 736px of content box; the panel
+      gave 728, so the sixth tile wrapped onto a second row. Tiles are 104
+      now with a 7px gap: 6*104 + 5*7 = 659 inside a 660 content box. The
+      whole tray is also shorter - it was taking a third of the height of a
+      real window, having only ever been checked in a small pane.  */
+  display:flex; flex-direction:column; gap:11px;
+  width:688px; margin:0 auto; padding:12px 14px 13px;
   background:var(--p-surface); border-radius:22px; border:0;
   box-shadow:var(--p-lift);
   font-family:'Nunito Sans', system-ui, sans-serif;
@@ -579,7 +585,7 @@ kbd{background:rgba(0,0,0,.35);border:1px solid rgba(255,255,255,.14);
   background:var(--p-sunk); border-radius:14px; padding:5px;
 }
 #toolbar .tab{
-  flex:1 1 0; border:0; cursor:pointer; padding:10px 0; border-radius:10px;
+  flex:1 1 0; border:0; cursor:pointer; padding:8px 0; border-radius:10px;
   background:transparent; color:var(--p-muted);
   font-family:'Outfit', system-ui, sans-serif; font-weight:600; font-size:14px;
   transition:background .12s, color .12s;
@@ -599,25 +605,25 @@ kbd{background:rgba(0,0,0,.35);border:1px solid rgba(255,255,255,.14);
     keep one size everywhere and the short groups sit in the middle,
     which reads as deliberate rather than unfinished. The panel width
     does not move between tabs, so the switch above it stays put.  */
-#toolbar .tgroup{ display:none; flex-wrap:wrap; justify-content:center; gap:8px; }
+#toolbar .tgroup{ display:none; flex-wrap:nowrap; justify-content:center; gap:7px; }
 #toolbar .tgroup.on{ display:flex; }
-#toolbar .tool{ flex:0 0 116px; }
+#toolbar .tool{ flex:0 0 104px; }
 
 /* the tiles */
 #toolbar .tool{
   position:relative; display:flex; flex-direction:column;
   align-items:center; justify-content:center; gap:7px;
-  width:auto; min-height:86px; padding:14px 8px 12px;
+  width:auto; min-height:72px; padding:10px 6px 9px;
   background:var(--p-tile); border:0; border-radius:14px; cursor:pointer;
   color:var(--p-ink); transition:background .12s, box-shadow .12s, transform .12s;
 }
 #toolbar .tool:hover{ background:#eeebe3; transform:translateY(-2px); }
 #toolbar .tool:active{ transform:translateY(0); }
 #toolbar .tool:focus-visible{ outline:2px solid var(--p-ink); outline-offset:2px; }
-#toolbar .tool .ic{ width:28px; height:28px; display:block; color:var(--p-ink); }
+#toolbar .tool .ic{ width:24px; height:24px; display:block; color:var(--p-ink); }
 #toolbar .tool i{ font-style:normal; font-size:22px; line-height:1; color:var(--p-ink); }
 #toolbar .tool span{
-  font-family:'Outfit', system-ui, sans-serif; font-weight:600; font-size:13px;
+  font-family:'Outfit', system-ui, sans-serif; font-weight:600; font-size:12px;
   line-height:1.15; color:var(--p-ink); text-align:center;
 }
 #toolbar .tool em{
@@ -889,10 +895,99 @@ kbd{background:rgba(0,0,0,.35);border:1px solid rgba(255,255,255,.14);
 #menu .menu-wrap{ grid-template-rows:1fr auto auto; height:100%; overflow:hidden; }
 #menu .menu-cols, #menu .menu-cols.two{ overflow:auto; min-height:0; padding-bottom:20px; }
 
-/* ---- the boot screen, same system ---- */
-#boot{ background:linear-gradient(160deg,#3a3129 0%,#241d16 62%,#1a1511 100%); }
-#boot .logo h1{ font-family:'Outfit', system-ui, sans-serif; font-weight:800; color:var(--p-surface); }
-#boot .logo h2{ font-family:'Outfit', system-ui, sans-serif; font-weight:700; color:var(--p-dirt); }
-#bootBar{ background:rgba(251,250,247,.16); }
-#bootBar > i, #bootBar span, #bootFill{ background:var(--p-food); }
-#bootMsg{ font-family:'Nunito Sans', system-ui, sans-serif; color:rgba(251,250,247,.55); letter-spacing:.06em; }
+/* ---- the boot screen ----
+   The first pass here missed because the selectors were written from
+   memory: the progress track is .boot-bar, not #bootBar, so none of it
+   applied and the screen kept its spinning dashed rings and its wide
+   letterspaced title. Read the markup, then styled it.  */
+#boot.overlay{ background:linear-gradient(160deg,#3a3129 0%,#241d16 62%,#1a1511 100%); }
+#boot .boot-inner{ display:flex; flex-direction:column; align-items:center; }
+
+/*  The rotating dashed circles were the busiest thing in the game and
+    said nothing. One steady drawn ant instead.  */
+#boot .logo-mark{ width:56px; height:56px; margin:0 auto 20px; animation:none; }
+#boot .logo-mark::before,
+#boot .logo-mark::after{ display:none; }
+#boot .logo-mark i{
+  position:absolute; inset:0; border-radius:0; background:none; box-shadow:none;
+  -webkit-mask:none; mask:none;
+  background-image:url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%234e9b5f' stroke-width='1.5' stroke-linecap='round' stroke-linejoin='round'><circle cx='16.6' cy='11' r='2.6'/><ellipse cx='11.6' cy='11.6' rx='2.4' ry='2'/><ellipse cx='6.2' cy='12' rx='3.6' ry='3'/><path d='M18.4 9 21 6.6M18.8 12.6l2.6.6'/><path d='M12.6 9.8 13.6 6.4M11.2 9.7 9.6 6.6M12.8 13.6l1.6 3M10.6 13.5 9 16.8'/></svg>");
+  background-repeat:no-repeat; background-size:contain; background-position:center;
+}
+#boot .logo h1{
+  font-family:'Outfit', system-ui, sans-serif; font-weight:800; font-size:40px;
+  letter-spacing:-.015em; margin-left:0; color:var(--p-surface);
+}
+#boot .logo h2{
+  font-family:'Outfit', system-ui, sans-serif; font-weight:700; font-size:11px;
+  letter-spacing:.4em; margin:9px 0 0 .4em; color:var(--p-dirt);
+}
+#boot .boot-bar{
+  width:280px; height:4px; border-radius:999px; margin:30px auto 14px;
+  background:rgba(251,250,247,.14); border:0; overflow:hidden;
+}
+#bootFill{ height:100%; background:var(--p-food); border-radius:999px; transition:width .25s; }
+#bootMsg{
+  font-family:'Nunito Sans', system-ui, sans-serif; font-size:13px;
+  color:rgba(251,250,247,.5); letter-spacing:.02em;
+}
+
+/* ==================================================================
+   THE MENU, SECOND PASS
+   ------------------------------------------------------------------
+   Three things were wrong on a real window and invisible in a small
+   preview pane: the species list ran off the bottom and scrolled, the
+   left panel was an empty dark rectangle with the title parked at the
+   very bottom, and a narrow window gave the whole screen to that panel
+   because it held a 1fr row inside an overflow:hidden wrap.
+   ================================================================== */
+
+/*  Species two across. Six in one column could never fit a 815px window
+    beside a heading, three difficulties, the graphics pills, the buttons
+    and the credit line - so it scrolled. Two columns of three fit.  */
+#menu #speciesList{
+  display:grid; grid-template-columns:1fr 1fr; gap:8px;
+}
+#menu .choice{ padding:12px 14px 11px; border-radius:14px; }
+#menu .choice .cn{ font-size:17px; margin-bottom:3px; }
+#menu .choice .perk,
+#menu .choice .cd{ font-size:13px; line-height:1.35; }
+#menu .menu-card h3{ font-size:12px; margin:0 0 10px; }
+#menu .menu-cols, #menu .menu-cols.two{ gap:26px; padding:34px 44px 0; }
+#menu .menu-foot{ padding:24px 44px 0; gap:12px; }
+#menu .big-btn{ padding:15px 34px; font-size:16px; }
+#menu .ghost-btn{ padding:13px 20px; font-size:14px; }
+#menu .credit{ padding:16px 44px 22px; }
+
+/*  Nothing scrolls. If a window is genuinely too short for the whole
+    screen the page scrolls as one piece rather than trapping the list
+    in its own scroller, which is what hid the sixth species.  */
+#menu .menu-cols, #menu .menu-cols.two{ overflow:visible; }
+#menu .menu-wrap{ overflow:auto; }
+
+/*  The left panel is a title card, not a void. Centred rather than
+    parked at the bottom, with one large drawn ant behind it so the
+    space reads as composed instead of unfilled.  */
+#menu .menu-head{
+  position:relative; overflow:hidden;
+  justify-content:center; padding:44px 44px;
+}
+#menu .menu-head::after{
+  content:""; position:absolute; right:-70px; top:50%;
+  width:420px; height:420px; margin-top:-210px; opacity:.055; pointer-events:none;
+  background-image:url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%23fbfaf7' stroke-width='1' stroke-linecap='round' stroke-linejoin='round'><circle cx='16.6' cy='11' r='2.6'/><ellipse cx='11.6' cy='11.6' rx='2.4' ry='2'/><ellipse cx='6.2' cy='12' rx='3.6' ry='3'/><path d='M18.4 9 21 6.6M18.8 12.6l2.6.6'/><path d='M12.6 9.8 13.6 6.4M11.2 9.7 9.6 6.6M12.8 13.6l1.6 3M10.6 13.5 9 16.8'/></svg>");
+  background-repeat:no-repeat; background-size:contain;
+}
+#menu .menu-head > *{ position:relative; z-index:1; }
+#menu .menu-head h1{ font-size:clamp(38px, 4.2vw, 58px); }
+#menu .tagline{ font-size:17px; margin-top:16px; }
+
+/*  Narrow: the head must not eat the screen. It was row 1 of a
+    1fr-first grid inside overflow:hidden, so it took everything and
+    clipped the choices entirely.  */
+@media (max-width:900px){
+  #menu .menu-wrap{ grid-template-rows:auto auto auto auto; height:auto; overflow:auto; }
+  #menu .menu-head{ min-height:220px; justify-content:flex-end; }
+  #menu .menu-head::after{ display:none; }
+  #menu #speciesList{ grid-template-columns:1fr; }
+}
