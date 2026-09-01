@@ -1,0 +1,145 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, user-scalable=no">
+<title>FORMICARIUM :: Deep Colony</title>
+<link rel="stylesheet" href="css/ui.css?v=52">
+<link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>&#128028;</text></svg>">
+</head>
+<body>
+
+<canvas id="gl"></canvas>
+
+<!-- ===================== BOOT / LOADING ===================== -->
+<div id="boot" class="overlay">
+  <div class="boot-inner">
+    <div class="logo">
+      <div class="logo-mark"><i></i></div>
+      <h1>FORMICARIUM</h1>
+      <h2>DEEP&nbsp;COLONY</h2>
+    </div>
+    <div class="boot-bar"><div id="bootFill"></div></div>
+    <div id="bootMsg">initialising substrateâ€¦</div>
+  </div>
+</div>
+
+<!-- ===================== MAIN MENU ===================== -->
+<div id="menu" class="overlay hidden">
+  <div class="menu-wrap">
+    <div class="menu-head">
+      <div class="logo small">
+        <div class="logo-mark"><i></i></div>
+        <h1>FORMICARIUM</h1>
+        <h2>DEEP&nbsp;COLONY</h2>
+      </div>
+      <p class="tagline">One glass tank on a quiet desk. Dig it out, feed them, watch them thrive.</p>
+    </div>
+
+    <div class="menu-cols two">
+      <section class="menu-card">
+        <h3>Pick your ants</h3>
+        <div id="speciesList" class="chooser"></div>
+      </section>
+      <section class="menu-card">
+        <h3>How much trouble?</h3>
+        <div id="diffList" class="chooser"></div>
+        <h3 style="margin-top:18px">Graphics</h3>
+        <div id="qualityList" class="chooser small-chooser"></div>
+        <div id="biomeList" class="hidden"></div>
+      </section>
+    </div>
+
+    <div class="menu-foot">
+      <button id="btnStart" class="big-btn">BEGIN THE COLONY</button>
+      <button id="btnLoad" class="ghost-btn">LOAD SAVE</button>
+      <button id="btnHelp" class="ghost-btn">CONTROLS &amp; MANUAL</button>
+    </div>
+    <div class="credit">a hand-built WebGL2 renderer · volumetric soil · procedural everything</div>
+  </div>
+</div>
+
+<!-- ===================== HELP ===================== -->
+<div id="help" class="overlay hidden">
+  <div class="panel-wide">
+    <h2>FIELD MANUAL</h2>
+    <div class="help-grid" id="helpBody"></div>
+    <button class="big-btn" data-close="help">CLOSE</button>
+  </div>
+</div>
+
+<!-- ===================== HUD ===================== -->
+<div id="hud" class="hidden">
+
+  <div id="bar">
+    <div class="stat" id="sFood"><i class="ic">â—†</i><b>0</b><span>FOOD</span><em class="rate"></em></div>
+    <div class="stat" id="sDirt"><i class="ic">â–¤</i><b>0</b><span>DIRT</span><em class="rate"></em></div>
+    <div class="stat" id="sPop"><i class="ic">âœ¦</i><b>0</b><span>ANTS</span><em class="rate"></em></div>
+    <div id="goal"><span>â€”</span></div>
+    <div id="dayBox">DAY&nbsp;<b id="dayNum">1</b></div>
+    <div class="speedbtns" id="speedBtns"></div>
+  </div>
+
+  <div id="alert" class="hidden">RAID!</div>
+  <div id="notifications"></div>
+  <div id="selcard" class="hidden"></div>
+
+  <div id="tray">
+    <div id="ctxhint"></div>
+    <div id="toolbar"></div>
+  </div>
+
+  <div id="stats"></div>
+  <div id="selbox" class="hidden"></div>
+  <div id="tip" class="hidden"></div>
+  <div id="pauseveil" class="hidden"><span>PAUSED</span></div>
+</div>
+
+<div id="settings" class="overlay hidden">
+  <div class="panel-wide center" style="width:min(520px,94vw)">
+    <h2>SETTINGS</h2>
+    <div id="setBody"></div>
+    <button class="big-btn" data-close="settings">BACK TO THE TANK</button>
+  </div>
+</div>
+
+<!-- ===================== END SCREEN ===================== -->
+<div id="endscreen" class="overlay hidden">
+  <div class="panel-wide center">
+    <h1 id="endTitle">COLONY LOST</h1>
+    <p id="endMsg"></p>
+    <div id="endStats" class="end-stats"></div>
+    <button class="big-btn" data-act="restart">START A NEW COLONY</button>
+  </div>
+</div>
+
+<script src="src/math.js?v=52"></script>
+<script src="src/gl.js?v=52"></script>
+<script src="src/geometry.js?v=52"></script>
+<script src="src/geometry_bugs.js?v=52"></script>
+<script src="src/shaders.js?v=52"></script>
+<script src="src/shaders_post.js?v=52"></script>
+<script src="src/renderer.js?v=52"></script>
+<script src="src/world.js?v=52"></script>
+<script src="src/sdf_cache.js?v=52"></script>
+<script src="src/particles.js?v=52"></script>
+<script src="src/water_render.js?v=52"></script>
+<script src="src/heap.js?v=52"></script>
+<script src="src/heap_render.js?v=52"></script>
+<script src="src/ants.js?v=52"></script>
+<script src="src/colony.js?v=52"></script>
+<script src="src/ai.js?v=52"></script>
+<script src="src/fx.js?v=52"></script>
+<script src="src/audio.js?v=52"></script>
+<script src="src/input.js?v=52"></script>
+<script src="src/game.js?v=52"></script>
+<script src="src/grains.js?v=52"></script>
+<script src="src/excavate.js?v=52"></script>
+<script src="src/creatures.js?v=52"></script>
+<script src="src/render_scene.js?v=52"></script>
+<script src="src/player.js?v=52"></script>
+<script src="src/ui.js?v=52"></script>
+<script src="src/save.js?v=52"></script>
+<script src="src/main.js?v=52"></script>
+</body>
+</html>
