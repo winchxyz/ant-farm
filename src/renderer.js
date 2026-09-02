@@ -119,6 +119,17 @@
   //  three_post.js hands state back through this after every pass it draws.
   R.threeResync = function () { if (R.three) threeResync(); };
 
+  //  MIGRATION STAGE 3. Flip this to false and every target below is a
+  //  GLX.FBO again - the adapter in three_post.js presents the same
+  //  surface, so nothing else in the engine can tell which it got. That is
+  //  the only reason a change this size is bisectable at all.
+  R.useThreeTargets = true;
+  function mkFBO(spec) {
+    return (AF.T3 && AF.T3.ready && R.useThreeTargets)
+      ? AF.T3.fbo(spec) : new GLX.FBO(spec);
+  }
+  R.mkFBO = mkFBO;
+
   // ==================================================================
   //  INIT
   // ==================================================================
@@ -247,7 +258,7 @@
     R.boxMesh = G.buildBox(1, 1, 1, false).build(P.soil, null);
 
     R.shadowSize = 2048;
-    R.shadowFB = new GLX.FBO({ width: R.shadowSize, height: R.shadowSize, depth: 'texture', depthFilter: gl.LINEAR });
+    R.shadowFB = mkFBO({ width: R.shadowSize, height: R.shadowSize, depth: 'texture', depthFilter: gl.LINEAR });
     R.lightVP = m4.create();
 
     R.segTexW = 1024;
@@ -280,21 +291,21 @@
       for (i = 0; i < R.bloomUp.length; i++) R.bloomUp[i].destroy();
     }
     var F16 = { internalFormat: gl.RGBA16F, format: gl.RGBA, type: gl.HALF_FLOAT };
-    R.sceneFB = new GLX.FBO({
+    R.sceneFB = mkFBO({
       width: w, height: h, depth: 'texture',
       color: [F16, { internalFormat: gl.RGBA8, format: gl.RGBA, type: gl.UNSIGNED_BYTE }]
     });
-    R.copyFB = new GLX.FBO({ width: w, height: h, color: [F16] });
+    R.copyFB = mkFBO({ width: w, height: h, color: [F16] });
     var aw = Math.max(1, w >> 1), ah = Math.max(1, h >> 1);
     var R8 = { internalFormat: gl.R8, format: gl.RED, type: gl.UNSIGNED_BYTE };
-    R.aoFB = new GLX.FBO({ width: aw, height: ah, color: [R8] });
-    R.aoFB2 = new GLX.FBO({ width: aw, height: ah, color: [R8] });
+    R.aoFB = mkFBO({ width: aw, height: ah, color: [R8] });
+    R.aoFB2 = mkFBO({ width: aw, height: ah, color: [R8] });
     R.dofA = new GLX.FBO({ width: aw, height: ah, color: [F16] });
     R.dofB = new GLX.FBO({ width: aw, height: ah, color: [F16] });
     var rw = Math.max(1, w >> 2), rh = Math.max(1, h >> 2);
     R.raysFB = new GLX.FBO({ width: rw, height: rh, color: [F16] });
     R.raysFB2 = new GLX.FBO({ width: rw, height: rh, color: [F16] });
-    R.compFB = new GLX.FBO({ width: w, height: h, color: [{ internalFormat: gl.RGBA8, format: gl.RGBA, type: gl.UNSIGNED_BYTE }] });
+    R.compFB = mkFBO({ width: w, height: h, color: [{ internalFormat: gl.RGBA8, format: gl.RGBA, type: gl.UNSIGNED_BYTE }] });
     if (AF.WR && AF.WR.ready) AF.WR.resize(w, h);
     R.bloom = []; R.bloomUp = [];
     var bw = w, bh = h;

@@ -102,5 +102,29 @@
   "vendoring": {
     "generator": "tools/vendor-three.py",
     "note": "r17x+ splits the browser build into three.core.min.js plus three.module.min.js, which imports from core AND re-exports it with an export{...}from\"...\" statement. Both forms have to be handled or the wrapper does not parse."
+  },
+  "stage3": {
+    "what": "sceneFB, copyFB, compFB, the AO pair and the shadow target are three WebGLRenderTargets, behind an adapter that presents the GLX.FBO surface.",
+    "sceneTarget": "MRT count 2 (RGBA16F + RGBA8) with a FloatType DepthTexture, compareFunction null. Verified COMPLETE with both colour attachments and depth reported as TEXTURE.",
+    "shadowTarget": "depth-only: 0 entries in .color, drawBuffers([NONE]) asserted on every bind, LINEAR depth guarded on OES_texture_float_linear.",
+    "waterHaloGate": {
+      "gate": "<=1838 px / <=5.95 energy",
+      "threeTargets": "960 px / 5.62",
+      "glxTargets": "981 px / 5.48",
+      "steadyStateScatter": "947-992 px / 5.48-5.78 over four runs"
+    },
+    "strictRun": {
+      "frames": 4000,
+      "lastError": null,
+      "errorLog": 0,
+      "msPerFrame": 1.07
+    },
+    "waterKnobsLive": true
+  },
+  "rebuildIsNotAB": {
+    "finding": "Reallocating render targets and comparing stills does not work as a stage gate. Rebuilding to the SAME backend twice differs by ~43,000 pixels, which is indistinguishable from three-vs-glx (~42,000) and glx-vs-glx (~44,000).",
+    "cause": "The first measurement after any target rebuild is unsettled - R.resize also rebuilds the water module's targets, and its ping-pong buffers need a few frames. Not the never-cleared shadow map: clearing it by hand changed nothing.",
+    "recipe": "Discard the first reading after a resize or a scene change and let ~10 frames pass. With that, the water halo metric is reproducible to +/-20 px.",
+    "briefGap": "Section 5 asks for a pixel A/B against the previous stage's stills, but Stage 3 by definition reallocates ~26 targets, so that comparison can only ever read its own settling noise. Use the functional gates instead."
   }
 }
