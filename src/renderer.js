@@ -116,6 +116,8 @@
     R.three.resetState();
     gl.clearColor(0, 0, 0, 1);
   }
+  //  three_post.js hands state back through this after every pass it draws.
+  R.threeResync = function () { if (R.three) threeResync(); };
 
   // ==================================================================
   //  INIT
@@ -185,6 +187,7 @@
       width: 1, height: 1, depth: 1,
       internalFormat: gl.R8, format: gl.RED, type: gl.UNSIGNED_BYTE
     });
+    if (AF.T3) AF.T3.init(R);
     if (AF.WR) AF.WR.init(R);
     if (AF.HeapR) AF.HeapR.init(R);
     P.bake = GLX.program(GLX.FS_VS, S.BAKE_FS, 'bake');
@@ -300,6 +303,19 @@
       R.bloom.push(new GLX.FBO({ width: bw, height: bh, color: [F16] }));
       R.bloomUp.push(new GLX.FBO({ width: bw, height: bh, color: [F16] }));
       if (bw <= 8 || bh <= 8) break;
+    }
+    //  MIGRATION STAGE 2. Level 0 of the down pyramid is written by three
+    //  now, so it needs a three target at exactly the same size and format
+    //  as the GLX.FBO it replaces - half float, LINEAR, no depth. The
+    //  GLX.FBO at R.bloom[0] stays allocated and unused so that the
+    //  pyramid's sizes, the `bw <= 8` stop and the bloomUp pairing are
+    //  read from one place; dropping it would silently shorten the chain.
+    if (AF.T3 && AF.T3.ready) {
+      if (R.bloomRT0) R.bloomRT0.dispose();
+      R.bloomRT0 = AF.T3.target(R.bloom[0].width, R.bloom[0].height);
+      if (!R.brightPass) R.brightPass = AF.T3.pass('bright', SP.BRIGHT_FS, {
+        uTex: null, uThreshold: 1.45, uSoft: 0.7
+      });
     }
   };
 
@@ -756,17 +772,33 @@
     }
 
     // bloom
-    R.bloom[0].bind(false);
-    P = R.P.bright; P.use();
-    P.tex('uTex', R.sceneFB.color[0]);
-    P.f('uThreshold', fx.bloomThreshold);
-    P.f('uSoft', 0.7);
-    GLX.fullscreen();
+    //  MIGRATION STAGE 2: the bright pass is drawn by three. Everything
+    //  downstream is still raw GL and reads the result through T3.raw,
+    //  which is the interop the rest of the stage depends on - a three
+    //  material samples this renderer's textures through ExternalTexture,
+    //  and raw passes sample three's targets through the WebGLTexture
+    //  inside them.
+    if (R.brightPass) {
+      R.brightPass.render(R.bloomRT0, {
+        uTex: AF.T3.extern(R.sceneFB.color[0]),
+        uThreshold: fx.bloomThreshold,
+        uSoft: 0.7
+      });
+    } else {
+      R.bloom[0].bind(false);
+      P = R.P.bright; P.use();
+      P.tex('uTex', R.sceneFB.color[0]);
+      P.f('uThreshold', fx.bloomThreshold);
+      P.f('uSoft', 0.7);
+      GLX.fullscreen();
+    }
     P = R.P.down;
     for (i = 1; i < R.bloom.length; i++) {
       R.bloom[i].bind(false);
       P.use();
-      P.tex('uTex', R.bloom[i - 1].color[0]);
+      var srcTex = (i === 1 && R.brightPass) ? AF.T3.raw(R.bloomRT0) : R.bloom[i - 1].color[0];
+      P.use();
+      P.tex('uTex', srcTex);
       P.v2('uTexel', 1 / R.bloom[i - 1].width, 1 / R.bloom[i - 1].height);
       GLX.fullscreen();
     }
@@ -780,7 +812,7 @@
       R.bloomUp[i].bind(false);
       P.use();
       P.tex('uTex', R.bloomUp[i + 1].color[0]);
-      P.tex('uPrev', R.bloom[i].color[0]);
+      P.tex('uPrev', (i === 0 && R.brightPass) ? AF.T3.raw(R.bloomRT0) : R.bloom[i].color[0]);
       P.v2('uTexel', 1 / R.bloomUp[i + 1].width, 1 / R.bloomUp[i + 1].height);
       P.f('uScatter', fx.bloomScatter);
       GLX.fullscreen();
