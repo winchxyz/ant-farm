@@ -634,6 +634,256 @@
   PS.stats = { solveMs: 0, substeps: 0, awake: 0, resident: 0 };
 
   // ---------------------------------------------------------------
+  //  WETNESS VOLUME - the ground remembers where the water went
+  //
+  //  soakIntoSoil below deletes water into the soil, and until now that was
+  //  the end of it: the drop vanished and the ground it drained into looked
+  //  exactly as dry as before it was poured on.
+  //
+  //  The live-pool decal in Game.pushWet cannot stand in for this. It is
+  //  keyed off PS.clusters, which are rebuilt from ALIVE particles every
+  //  half second, so the damp patch disappears in the same step as the last
+  //  drop - the one moment the player is actually looking for it. It is
+  //  also a flat quad dropped at farm.localTop(), the analytic heightfield,
+  //  which knows nothing about excavation: inside a dug Water Pit the dark
+  //  disc hangs in the air at the old ground level, and on a tunnel wall it
+  //  cannot appear at all.
+  //
+  //  So wetness is stored where the soil is stored: a scalar volume over
+  //  exactly the same world box as the baked SDF (farm.sdfMin..farm.sdfMax),
+  //  sampled by SOIL_FS at whatever world point the raymarch stopped at. Pit
+  //  floor, tunnel wall and flat top are the same fragment shader hitting
+  //  the same field, so all three come out damp for free.
+  //
+  //  Resolution: 90 x 40 x 30 over a 54 x 23 x 17 box, i.e. cells of
+  //  0.600 x 0.575 x 0.567 - as close to cubic as integer counts get on a
+  //  box that shape. The cell size is the fluid kernel radius H (0.60) on
+  //  purpose: a wetness field cannot carry detail finer than the water that
+  //  wrote it, and anything smaller only costs memory. That is 108,000
+  //  texels - 108,000 bytes on the GPU as R8, a third of the 96x60x56 SDF -
+  //  and 648,000 bytes on the CPU: a Float32 accumulator, because a single
+  //  frame deposits far less than one 1/255 quantum and a byte field would
+  //  quantise the accumulation away entirely, plus a Uint8 mirror of what
+  //  the texture currently holds and a Uint8 staging buffer for the sub-box
+  //  upload.
+  // ---------------------------------------------------------------
+  var WGX = 90, WGY = 40, WGZ = 30;
+  var WET_TICK = 0.15;        // seconds between dry-and-upload passes
+  var WET_DRY_TAU = 75.0;     // e-folding time of a damp patch, seconds
+  var WET_SIT = 0.06;         // saturation rate per second per touching drop
+  var WET_DROP = 0.10;        // extra dumped by a drop that finishes draining
+  //  How far INSIDE the soil a splat is centred. Not zero, because half of
+  //  a splat centred exactly on the surface lands in cells that are air and
+  //  the raymarch never visits - that half is simply thrown away. Not deep
+  //  either: the raymarch stops essentially AT the surface (SOIL_FS breaks
+  //  on d<0.008), so whatever the shader reads is a trilinear sample taken
+  //  there, and burying the splat centre by half a cell costs half the mark.
+  //  Cell height is 23/40 = 0.575, so 0.14 is a quarter of a cell: the
+  //  deposit still lands in soil, and the surface reads about three quarters
+  //  of the peak instead of the half that 0.30 gave. Measured: a drained
+  //  puddle went from 7.6% to 18.6% peak darkening on the same pour.
+  var WET_BURY = 0.14;
+
+  var Wet = {};
+  Wet.GX = WGX; Wet.GY = WGY; Wet.GZ = WGZ;
+
+  //  No initial data is handed to texImage3D. WebGL guarantees a texture
+  //  created with null contents reads back as zero, which is exactly "dry",
+  //  and passing a packed 90-byte-wide R8 array here would hit the same
+  //  UNPACK_ALIGNMENT trap that GLX.texture3DSub exists to sidestep.
+  Wet.create = function (farm) {
+    var GLX = AF.GLX, gl = GLX && GLX.gl;
+    if (!gl || !farm || !farm.sdfMin) return null;
+    var n = WGX * WGY * WGZ;
+    return {
+      gx: WGX, gy: WGY, gz: WGZ,
+      min: [farm.sdfMin[0], farm.sdfMin[1], farm.sdfMin[2]],
+      cell: [(farm.sdfMax[0] - farm.sdfMin[0]) / WGX,
+             (farm.sdfMax[1] - farm.sdfMin[1]) / WGY,
+             (farm.sdfMax[2] - farm.sdfMin[2]) / WGZ],
+      f: new Float32Array(n),      // accumulator, 0..1
+      u8: new Uint8Array(n),       // what the texture currently holds
+      pack: new Uint8Array(n),     // staging for one sub-box upload
+      lo: [WGX, WGY, WGZ], hi: [-1, -1, -1],   // cells holding anything
+      dlo: [WGX, WGY, WGZ], dhi: [-1, -1, -1], // cells the texture lacks
+      acc: 0, uploads: 0, texels: 0,
+      tex: GLX.texture3D({
+        width: WGX, height: WGY, depth: WGZ,
+        internalFormat: gl.R8, format: gl.RED, type: gl.UNSIGNED_BYTE
+      })
+    };
+  };
+
+  //  Deposit wetness at a world point, spread across the eight texels a
+  //  trilinear FETCH at that point would read. This is the exact adjoint of
+  //  the shader's texture() call, and it is written out longhand because of
+  //  the half texel: BAKE_FS puts texel i at uvw=(i+0.5)/g (see
+  //  'vec3 cell=vec3(gl_FragCoord.xy,uLayer+0.5)' in shaders.js), so the CPU
+  //  has to subtract that same 0.5 or every patch lands a third of a cell
+  //  off in each axis - a damp mark that visibly does not line up with the
+  //  puddle that made it.
+  //
+  //  The deposit SATURATES: each texel moves a fraction of the way to 1
+  //  rather than adding a fixed amount. That is what makes the rates above
+  //  robust. A linear accumulator has to be tuned against how many drops
+  //  happen to be touching soil per cell per second, which changes with the
+  //  size of the pour and the shape of what it lands in; a saturating one
+  //  cannot overshoot however much water is tipped on it, and a single drop
+  //  passing over still leaves only a faint mark.
+  Wet.add = function (v, x, y, z, a) {
+    if (!v || !(a > 0)) return;
+    if (a > 1) a = 1;
+    var fx = (x - v.min[0]) / v.cell[0] - 0.5;
+    var fy = (y - v.min[1]) / v.cell[1] - 0.5;
+    var fz = (z - v.min[2]) / v.cell[2] - 0.5;
+    var i0 = Math.floor(fx), j0 = Math.floor(fy), k0 = Math.floor(fz);
+    var tx = fx - i0, ty = fy - j0, tz = fz - k0;
+    var f = v.f, gx = v.gx, gy = v.gy, gz = v.gz, gxy = gx * gy;
+    for (var dz = 0; dz < 2; dz++) {
+      var kk = k0 + dz; if (kk < 0 || kk >= gz) continue;
+      var wz = dz ? tz : 1 - tz;
+      for (var dy = 0; dy < 2; dy++) {
+        var jj = j0 + dy; if (jj < 0 || jj >= gy) continue;
+        var wy = wz * (dy ? ty : 1 - ty);
+        for (var dx = 0; dx < 2; dx++) {
+          var ii = i0 + dx; if (ii < 0 || ii >= gx) continue;
+          var w = wy * (dx ? tx : 1 - tx);
+          if (w <= 0) continue;
+          var idx = ii + jj * gx + kk * gxy;
+          f[idx] += (1 - f[idx]) * w * a;
+          if (ii < v.lo[0]) v.lo[0] = ii;
+          if (ii > v.hi[0]) v.hi[0] = ii;
+          if (jj < v.lo[1]) v.lo[1] = jj;
+          if (jj > v.hi[1]) v.hi[1] = jj;
+          if (kk < v.lo[2]) v.lo[2] = kk;
+          if (kk > v.hi[2]) v.hi[2] = kk;
+        }
+      }
+    }
+  };
+
+  //  Push the cells the texture has not been told about yet, and only those.
+  //  Returns the number of texels sent, which is the number to watch when
+  //  arguing about whether this is expensive: a normal pour dirties a box of
+  //  perhaps 10x6x10 and sends 600 bytes; the worst case anyone can
+  //  construct - the entire field wet and drying at once - is 108,000 bytes,
+  //  and at the tick rate below that is 720 KB/s. Re-sending the whole
+  //  volume every frame instead would be 6.5 MB/s for no visible gain.
+  Wet.upload = function (v) {
+    if (!v || v.dhi[0] < v.dlo[0]) return 0;
+    var GLX = AF.GLX;
+    if (!GLX || !GLX.gl) return 0;
+    var x0 = v.dlo[0], y0 = v.dlo[1], z0 = v.dlo[2];
+    var w = v.dhi[0] - x0 + 1, h = v.dhi[1] - y0 + 1, d = v.dhi[2] - z0 + 1;
+    var u8 = v.u8, pk = v.pack, gx = v.gx, gxy = gx * v.gy, o = 0;
+    for (var k = 0; k < d; k++) {
+      for (var j = 0; j < h; j++) {
+        var src = x0 + (y0 + j) * gx + (z0 + k) * gxy;
+        for (var i = 0; i < w; i++) pk[o++] = u8[src + i];
+      }
+    }
+    GLX.texture3DSub(v.tex, x0, y0, z0, w, h, d, pk.subarray(0, o));
+    v.dlo[0] = v.gx; v.dlo[1] = v.gy; v.dlo[2] = v.gz;
+    v.dhi[0] = -1; v.dhi[1] = -1; v.dhi[2] = -1;
+    v.uploads++; v.texels = o;
+    return o;
+  };
+
+  //  Dry out, quantise, and upload whatever actually changed.
+  //
+  //  Runs every WET_TICK (0.15s), not every frame. A damp patch is not a
+  //  fast effect and nothing about it is worth a 3D upload sixty times a
+  //  second. The scan covers only the LIVE box - the cells that hold
+  //  anything at all - which for one pour is a few hundred of the 108,000,
+  //  and the box is rebuilt from what is still wet on the way through, so a
+  //  tank that was rained on once does not keep paying for it.
+  //
+  //  Decay is exponential with a per-biome time constant, so bog soil (0.95)
+  //  holds a stain about 94 seconds and desert sand (0.10) about 40. It runs
+  //  on RAW time for the same reason PS.soakIntoSoil does: fast-forwarding
+  //  the game should not fast-forward the puddles.
+  //
+  //  This must NOT be folded into PS.step. PS.step returns immediately when
+  //  no particles are resident, and that is exactly the moment the last drop
+  //  has soaked away - the stain would freeze at full strength and never
+  //  fade. It is called from Game.update instead.
+  Wet.tick = function (farm, rawDt) {
+    var v = farm && farm.wet;
+    if (!v) return 0;
+    v.acc += rawDt;
+    if (v.acc < WET_TICK) return 0;
+    var dt = v.acc; v.acc = 0;
+    if (v.hi[0] >= v.lo[0]) {
+      var bw = farm.wetness === undefined ? 0.5 : farm.wetness;
+      var keep = Math.exp(-dt / (WET_DRY_TAU * (0.45 + 0.85 * bw)));
+      var f = v.f, u8 = v.u8, gx = v.gx, gxy = gx * v.gy;
+      var nlo0 = v.gx, nlo1 = v.gy, nlo2 = v.gz, nhi0 = -1, nhi1 = -1, nhi2 = -1;
+      for (var k = v.lo[2]; k <= v.hi[2]; k++) {
+        for (var j = v.lo[1]; j <= v.hi[1]; j++) {
+          var row = j * gx + k * gxy;
+          for (var i = v.lo[0]; i <= v.hi[0]; i++) {
+            var idx = row + i;
+            var w = f[idx] * keep;
+            //  One R8 quantum is 1/255. Below that a cell is going to read
+            //  as zero on the GPU no matter what the float says, so let it
+            //  go and let the live box shrink past it rather than carrying
+            //  a texel that can never be seen again.
+            if (w < 0.004) w = 0;
+            f[idx] = w;
+            var q = w <= 0 ? 0 : (w >= 1 ? 255 : (w * 255) | 0);
+            if (q !== u8[idx]) {
+              u8[idx] = q;
+              if (i < v.dlo[0]) v.dlo[0] = i;
+              if (i > v.dhi[0]) v.dhi[0] = i;
+              if (j < v.dlo[1]) v.dlo[1] = j;
+              if (j > v.dhi[1]) v.dhi[1] = j;
+              if (k < v.dlo[2]) v.dlo[2] = k;
+              if (k > v.dhi[2]) v.dhi[2] = k;
+            }
+            if (w > 0) {
+              if (i < nlo0) nlo0 = i;
+              if (i > nhi0) nhi0 = i;
+              if (j < nlo1) nlo1 = j;
+              if (j > nhi1) nhi1 = j;
+              if (k < nlo2) nlo2 = k;
+              if (k > nhi2) nhi2 = k;
+            }
+          }
+        }
+      }
+      v.lo[0] = nlo0; v.lo[1] = nlo1; v.lo[2] = nlo2;
+      v.hi[0] = nhi0; v.hi[1] = nhi1; v.hi[2] = nhi2;
+    }
+    return Wet.upload(v);
+  };
+
+  //  Read one point back, for measurement. Nearest cell, no filtering - this
+  //  is not what the shader does and is not meant to be; it is here so a
+  //  test can ask "is the ground under this puddle actually wet" without
+  //  reading pixels.
+  Wet.at = function (v, x, y, z) {
+    if (!v) return 0;
+    var i = Math.round((x - v.min[0]) / v.cell[0] - 0.5);
+    var j = Math.round((y - v.min[1]) / v.cell[1] - 0.5);
+    var k = Math.round((z - v.min[2]) / v.cell[2] - 0.5);
+    if (i < 0 || j < 0 || k < 0 || i >= v.gx || j >= v.gy || k >= v.gz) return 0;
+    return v.f[i + j * v.gx + k * v.gx * v.gy];
+  };
+
+  //  ...and a summary, so a test has one number to quote.
+  Wet.stats = function (v) {
+    if (!v) return null;
+    var n = 0, peak = 0, sum = 0;
+    for (var i = 0; i < v.f.length; i++) {
+      var w = v.f[i];
+      if (w > 0.02) n++;
+      if (w > peak) peak = w;
+      sum += w;
+    }
+    return { cells: n, peak: peak, total: sum, uploads: v.uploads, lastTexels: v.texels };
+  };
+
+  // ---------------------------------------------------------------
   //  Soaking. Water lying against soil drains into it and is gone.
   //
   //  Only the layer actually touching the ground counts, so a deep pool
@@ -651,8 +901,26 @@
       var d = PS.sdf(farm, px[i], py[i], pz[i], _g);
       if (d < SOAK_CONTACT) {
         soak[i] += dt;
+        //  Water lying ON soil dampens it, not only water that finishes
+        //  draining. Without this a pool that sits in a pit for a minute and
+        //  is then drunk or bailed out leaves the ground bone dry, which is
+        //  the opposite of what a pool does to ground.
+        //
+        //  The splat goes on the SOIL SURFACE, not at the drop. PS.sdf has
+        //  just handed back the distance d and the normalised outward
+        //  gradient _g, so p - _g*d is the nearest point on the soil and
+        //  p - _g*(d + WET_BURY) is half a cell inside it, where the shader
+        //  actually samples. Splatting at the drop centre would put most of
+        //  the deposit in air the raymarch never visits, and against a
+        //  tunnel WALL - where the gradient is horizontal, not vertical -
+        //  it would miss the wall completely.
+        var _sd = d + WET_BURY;
+        var _wx = px[i] - _g[0] * _sd, _wy = py[i] - _g[1] * _sd, _wz = pz[i] - _g[2] * _sd;
+        Wet.add(farm.wet, _wx, _wy, _wz, WET_SIT * dt);
         if (soak[i] >= soakCap[i]) {
           var rx = px[i], ry = py[i], rz = pz[i];
+          //  and the rest of the drop goes in where it finally vanished
+          Wet.add(farm.wet, _wx, _wy, _wz, WET_DROP);
           PS.remove(i);
           gone++;
           //  The drop above it was resting on the drop that just left. Wake
@@ -922,5 +1190,6 @@
   };
 
   AF.PS = PS;
+  AF.Wet = Wet;
 
 })(window.AF = window.AF || {});

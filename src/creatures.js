@@ -270,43 +270,46 @@
       }
 
       //  move, staying inside the glass
+      var wasX = c.pos[0], wasZ = c.pos[2];
       var vx = tx - c.pos[0], vz = tz - c.pos[2];
       var vl = Math.sqrt(vx * vx + vz * vz) || 1;
       if (!c.feeding) {
         c.pos[0] += vx / vl * sp * dt;
         c.pos[2] += vz / vl * sp * dt;
       }
-      var hx = c.farm.half[0] - 0.8, hz = c.farm.half[2] - 0.8;
-      c.pos[0] = M.clamp(c.pos[0], c.farm.center[0] - hx, c.farm.center[0] + hx);
-      c.pos[2] = M.clamp(c.pos[2], c.farm.center[2] - hz, c.farm.center[2] + hz);
 
-      //  STONES ARE SOLID.
+      //  STONES ARE SOLID - and this is the fourth attempt at saying so.
       //
-      //  Movement was a straight step toward the target followed by a clamp
-      //  to the glass, and nothing else - so every animal walked through the
-      //  pebbles as if they were painted on. Push out of any stone it has
-      //  ended up inside, along the line from the stone's centre, which
-      //  makes it slide around the obstacle instead of stopping dead
-      //  against it.
+      //  The previous three all pushed out of a circle of radius
+      //  0.62*prop.scale. The stone the player is looking at is a bigrock,
+      //  rng.range(1.1, 2.1), drawn at instance scale p.scale against a mesh
+      //  0.898 units wide: 1.886 across, defended at 1.302. Every animal in
+      //  the bestiary could stand with its CENTRE inside the outline of the
+      //  biggest rock in the tank - centipede by 0.164, woodlouse 0.185,
+      //  beetle 0.206, spider 0.324. The collision was never missing; it was
+      //  defending a circle that is not the one on screen. Game.resolveProps
+      //  takes its radius from Game.PROP_DRAW, the same table pushProps draws
+      //  from, so the two cannot disagree again.
       //
-      //  Grass is not solid: a woodlouse walks through a tuft, and blocking
-      //  on grass would fence the animals into the bare patches.
-      var props = c.farm.props;
-      if (props) {
-        var reach = 2.2 + d.scale;
-        for (var pi = 0; pi < props.length; pi++) {
-          var pr = props[pi];
-          if (pr.kind === 'grass') continue;
-          var dx = c.pos[0] - pr.x, dz = c.pos[2] - pr.z;
-          var dd = dx * dx + dz * dz;
-          if (dd > reach * reach) continue;
-          var need = pr.scale * 0.62 + d.scale * 0.42;
-          if (dd >= need * need || dd < 1e-6) continue;
-          var dl = Math.sqrt(dd);
-          c.pos[0] = pr.x + dx / dl * need;
-          c.pos[2] = pr.z + dz / dl * need;
-        }
-      }
+      //  Three more things it fixes here. The glass clamp used to run BEFORE
+      //  the push-out, so a push-out could leave an animal outside the tank
+      //  with nothing left to catch it; the resolver clamps every iteration.
+      //  The old loop took the last prop in array order rather than the
+      //  deepest overlap, so one push could shove a body into a prop it had
+      //  already cleared - normal, not exotic, with pebbles scattered in
+      //  overlapping drifts. And it tested only where the step ENDED: a
+      //  centipede at 4.2 covers 1.68 units in a single frame at 8x speed,
+      //  further than most props are wide, so it passed through the middle
+      //  of them with both endpoints on clean sand. Handing it wasX/wasZ
+      //  tests the whole step.
+      //
+      //  Grass, leaves and twigs stay passable - see the table.
+      //
+      //  Note this now runs for a FEEDING animal too. c.feeding skips the
+      //  move, not the resolve, so a beetle that settles onto a sugar heap
+      //  lying against a stone is still pushed off the stone.
+      Game.resolveProps(c.farm, c.pos, d.scale * 0.42,
+        c.farm.half[0] - 0.8, c.farm.half[2] - 0.8, wasX, wasZ);
       //  ride the terrain, and the sugar heap on top of it
       var ground = c.farm.localTop(c.pos[0], c.pos[2]);
       if (AF.Heap) ground = Math.max(ground, AF.Heap.surfaceAt(c.pos[0], c.pos[2]));

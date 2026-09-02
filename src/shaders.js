@@ -155,6 +155,29 @@
     '}'
   ].join('\n');
 
+  //  Where the water went. A scalar field over exactly the same world box as
+  //  the baked SDF, so it needs no box uniforms of its own: uSdfMin and
+  //  uSdfMax from SDFLIB above already describe it, and one sampler is the
+  //  entire cost on this side.
+  //
+  //  It has to be a VOLUME rather than a decal because the soil is a
+  //  raymarch. The fragment shading the flat top, the fragment shading the
+  //  floor of a dug pit and the fragment shading a tunnel wall are all the
+  //  same shader stopping at some world point; there is no surface, no UV
+  //  and nothing to hang a flat texture on. Sampling a volume at the hit
+  //  point is the only form of wetness that reaches all three at once.
+  //
+  //  This is deliberately kept out of SDFLIB. SDFLIB is included by exactly
+  //  one program today, but the moment a second one picks it up it would
+  //  inherit a sampler nobody binds.
+  S.WETLIB = [
+    'uniform sampler3D uWetVol;',
+    'float wetAt(vec3 p){',
+    '  vec3 uvw=clamp((p-uSdfMin)/(uSdfMax-uSdfMin),vec3(0.0),vec3(1.0));',
+    '  return texture(uWetVol,uvw).r;',
+    '}'
+  ].join('\n');
+
   // surface height : MUST match AF.World.surfaceH in world.js
   S.SURFACE = [
     'float surfaceH(vec2 q){',
@@ -243,6 +266,7 @@
     S.LIGHTING,
     S.SHADOW,
     S.SDFLIB,
+    S.WETLIB,
     'in vec3 vWorld;',
     'uniform mat4 uVP;',
     'uniform vec3 uBoxCenter;',
@@ -421,6 +445,36 @@
     '  N=normalize(N+dn*dnAmt+dn2*dn2Amt);',
     '  float rough,spec;',
     '  vec3 albedo=soilAlbedo(p,N,rough,spec);',
+    '  //  Damp soil, from the wetness volume that PS.soakIntoSoil writes.',
+    '  //',
+    '  //  Applied HERE and not inside soilAlbedo on purpose. That function',
+    '  //  has three separate exits - two storybook branches and the',
+    '  //  photoreal one, each returning its own colour and its own rough and',
+    '  //  spec - so wetting it from the inside means writing the same thing',
+    '  //  three times and missing one. Wetting the result once, after the',
+    '  //  call, cannot miss a branch.',
+    '  //',
+    '  //  Water in the pores means light bounces around inside the grains',
+    '  //  instead of scattering straight back out, so less of it returns and',
+    '  //  what does return has been filtered by the pigment more times. Wet',
+    '  //  soil is DARKER and MORE saturated, never grey: that is the push',
+    '  //  away from luminance followed by the flat 0.55. It is written as a',
+    '  //  lerp rather than as pow(albedo,1.0+k) because the storybook',
+    '  //  branches deliberately scale their colours above 1.0 (uSoilB*2.30),',
+    '  //  and a pow would BRIGHTEN those instead of darkening them.',
+    '  //',
+    '  //  uWetness, the per-farm biome scalar, is left alone. It has already',
+    '  //  set rough and spec inside soilAlbedo; this only bends them further,',
+    '  //  so a bog still starts out damp and a puddle poured onto desert sand',
+    '  //  still reads as a puddle against dry sand around it.',
+    '  float wetv=clamp(wetAt(p),0.0,1.0);',
+    '  if(wetv>0.002){',
+    '    float lum=dot(albedo,vec3(0.299,0.587,0.114));',
+    '    vec3 damp=max(mix(vec3(lum),albedo,1.30)*0.55,vec3(0.0));',
+    '    albedo=mix(albedo,damp,wetv);',
+    '    rough=clamp(rough-0.34*wetv,0.05,1.0);',
+    '    spec=spec+0.60*wetv;',
+    '  }',
     '  float ao=onPane?1.0:sdfAO(p,N,d);',
     '  if(onPane){',
     '    // a tunnel running just behind the pane shows through as a dark bloom',

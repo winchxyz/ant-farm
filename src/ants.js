@@ -509,6 +509,13 @@
     var dx = tx - this.pos[0], dz = tz - this.pos[2];
     var d = Math.sqrt(dx * dx + dz * dz);
     var speed = this.speed * gs.speedMod * (speedMul || 1) * (this.carry ? 0.8 : 1);
+    //  Where the body starts the frame. The stone resolver needs the whole
+    //  step and not only its endpoint: at 8x game speed dt reaches 0.40s and
+    //  a scout covers 1.95 units in one frame, which is wider than the
+    //  blocking circle of every prop in the tank bar a large bigrock. Tested
+    //  at the endpoint alone the ant is outside the stone before the step and
+    //  outside it after, and walks clean through the middle.
+    var wasX = this.pos[0], wasZ = this.pos[2];
     if (d > 0.02) {
       dx /= d; dz /= d;
       // wander noise so trails look organic
@@ -520,33 +527,6 @@
       var step = Math.min(speed * dt, d);
       this.pos[0] += dx * step;
       this.pos[2] += dz * step;
-      // stay inside the tank, but not so far in that nest entrances
-      // (which sit right against the front pane) become unreachable
-      var hx = f.half[0] - 0.45, hz = f.half[2] - 0.25;
-      this.pos[0] = M.clamp(this.pos[0], f.center[0] - hx, f.center[0] + hx);
-      this.pos[2] = M.clamp(this.pos[2], f.center[2] - hz, f.center[2] + hz);
-
-      //  Stones are solid for ants too. Surface movement clamped to the
-      //  glass and nothing else, so a forager walked straight through a
-      //  pebble on its way to a crumb. Pushed out along the line from the
-      //  stone's centre, which lets it round the obstacle instead of
-      //  sticking to it. Grass stays passable - an ant walks through a tuft.
-      var props = f.props;
-      if (props) {
-        var mySz = this.def.scale * this.sizeVar;
-        for (var pi = 0; pi < props.length; pi++) {
-          var pr = props[pi];
-          if (pr.kind === 'grass') continue;
-          var ox = this.pos[0] - pr.x, oz = this.pos[2] - pr.z;
-          var od = ox * ox + oz * oz;
-          if (od > 9) continue;
-          var need = pr.scale * 0.60 + mySz * 0.5;
-          if (od >= need * need || od < 1e-6) continue;
-          var ol = Math.sqrt(od);
-          this.pos[0] = pr.x + ox / ol * need;
-          this.pos[2] = pr.z + oz / ol * need;
-        }
-      }
       this.yaw = M.angleLerp(this.yaw, Math.atan2(dx, dz), Math.min(1, dt * 9));
       this.walk = M.damp(this.walk, 1, 10, dt);
       this.phase += speed * 3.2 * dt;
@@ -566,6 +546,40 @@
         this.surfGoal = null;   // that destination is off limits, pick another
       }
     }
+    //  Glass and stones, resolved together, once, at the END of the move -
+    //  and OUTSIDE the branch above. Three separate faults met here.
+    //
+    //  The clamp and the old prop loop both lived inside `if (d > 0.02)`, so
+    //  an ant sitting on its goal got neither: nothing pushed it out of a
+    //  stone it was already standing in, and nothing would, for as long as it
+    //  stood there. Idle ants steer at pos + a wobble of amplitude 2.0, which
+    //  passes through the ant's own position twice a cycle.
+    //
+    //  pushOutOfEnemy runs just above and moves the body up to nine units in
+    //  one go, ignoring glass and props alike. It used to run AFTER the
+    //  clamp, so an ant driven off the neighbours' doorstep could be dropped
+    //  through a stone or past the pane. Resolving last covers it, and
+    //  passing the frame's start position folds that jump into the sweep.
+    //
+    //  Radius, ordering and the broad phase all now come from
+    //  Game.PROP_DRAW, which is the same table render_scene.js draws from -
+    //  see the long comment there for what the two of them used to disagree
+    //  about and by how much. The body term is unchanged: half the ant.
+    //  Record how far the resolve had to shove the body, so the no-teleport
+    //  clamp at the end of update() can let that part through. A push-out is
+    //  a CONSTRAINT, not travel: the ant is not moving there, it is being
+    //  told it may not be where it is. Rate-limiting it to walking pace
+    //  leaves the body inside the stone for as many frames as the limiter
+    //  needs to pay off the debt - measured at 8x game speed, 2 ant-frames
+    //  in 11912 ended up back inside the biggest rock for exactly this
+    //  reason, and it was the only remaining cause once the radius was
+    //  right. The clamp still owns the walking step; it just does not get to
+    //  veto the constraint riding on top of it.
+    var _sx = this.pos[0], _sz = this.pos[2];
+    AF.Game.resolveProps(f, this.pos, this.def.scale * this.sizeVar * 0.5,
+      f.half[0] - 0.45, f.half[2] - 0.25, wasX, wasZ);
+    this.solveD = Math.sqrt((this.pos[0] - _sx) * (this.pos[0] - _sx) +
+      (this.pos[2] - _sz) * (this.pos[2] - _sz));
     var y0 = f.localTop(this.pos[0], this.pos[2]);
     this.pos[1] = M.damp(this.pos[1], y0, 22, dt);
     var e = 0.4;
@@ -846,7 +860,11 @@
     if (this._px !== undefined && !this.warp) {
       var jx = this.pos[0] - this._px, jy = this.pos[1] - this._py, jz = this.pos[2] - this._pz;
       var jd = Math.sqrt(jx * jx + jy * jy + jz * jz);
-      var lim = Math.max(this.speed * 2.2 * dt, 0.05);
+      //  Plus whatever a prop push-out had to correct this frame. See the
+      //  note in surfaceMove: that displacement is a constraint being
+      //  enforced, not the ant walking, and clamping it to walking pace is
+      //  what let a body sit inside a stone at high game speed.
+      var lim = Math.max(this.speed * 2.2 * dt, 0.05) + (this.solveD || 0);
       if (jd > lim) {
         var k = lim / jd;
         this.pos[0] = this._px + jx * k;
@@ -855,6 +873,10 @@
       }
     }
     this.warp = false;
+    //  Cleared unconditionally: the clamp above is skipped on the first
+    //  frame and on a warp, and a stale allowance carried into the next
+    //  frame would quietly widen the limiter for a step that earned nothing.
+    this.solveD = 0;
     this._px = this.pos[0]; this._py = this.pos[1]; this._pz = this.pos[2];
 
     //  Never let an ant end a frame outside the glass. The nest slab is

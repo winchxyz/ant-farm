@@ -19,6 +19,33 @@
     this.name = name;
     this.cap = capacity;
     this.n = 0;
+    //  HOW WIDE THIS MESH IS, MEASURED RATHER THAN GUESSED.
+    //
+    //  Prop collision used to answer "how big is that stone" with a hand
+    //  written multiple of prop.scale, and the answer drifted away from what
+    //  this file actually draws. A bigrock is pushed at instance scale
+    //  p.scale against a mesh whose widest XZ ring is 0.898 units, so the
+    //  stone on screen was 0.898*p.scale across while both movers defended
+    //  0.62*p.scale - and a worker ant stood entirely inside the outline of
+    //  the biggest rock in the tank. Two hand-maintained numbers in two files
+    //  cannot be kept in agreement; there has to be one number.
+    //
+    //  So take it from the geometry. This walks the position array that is
+    //  about to become the aPos attribute and records the largest distance
+    //  from the mesh origin in the XZ plane. The instance transform is
+    //  R*(p*aIPos.w) + aIPos.xyz with R = Ry*Rx*Rz (shaders.js, eulerM), and
+    //  props carry only yaw plus a tilt of at most 0.2 rad; yaw cannot change
+    //  an XZ radius at all and the tilt moves these by under 0.4% (bigrock
+    //  0.8981 -> 0.8955, pebble 0.8951 -> 0.8917), so
+    //  worldRadius = meshR * aIPos.w to well inside a millimetre.
+    //
+    //  Cost: 25 meshes, a few thousand vertices, once, at load.
+    var _bp = builder.pos, _mr = 0;
+    for (var _v = 0; _v < _bp.length; _v += 3) {
+      var _rr = _bp[_v] * _bp[_v] + _bp[_v + 2] * _bp[_v + 2];
+      if (_rr > _mr) _mr = _rr;
+    }
+    this.meshR = Math.sqrt(_mr);
     this.iPos = new Float32Array(capacity * 4);
     this.iRot = new Float32Array(capacity * 4);
     this.iAnim = new Float32Array(capacity * 4);
@@ -88,6 +115,13 @@
     P.particle = GLX.program(S.PART_VS, S.PART_FS, 'particle');
     P.decal = GLX.program(S.DECAL_VS, S.DECAL_FS, 'decal');
     P.wet = GLX.program(S.DECAL_VS, S.WET_FS, 'wet');
+    //  One black texel, for a farm that has no wetness volume of its own.
+    //  Made here so that binding it never has to allocate mid-frame - see
+    //  the note in R.drawSoil.
+    R.zeroVol = GLX.texture3D({
+      width: 1, height: 1, depth: 1,
+      internalFormat: gl.R8, format: gl.RED, type: gl.UNSIGNED_BYTE
+    });
     if (AF.WR) AF.WR.init(R);
     if (AF.HeapR) AF.HeapR.init(R);
     P.bake = GLX.program(GLX.FS_VS, S.BAKE_FS, 'bake');
@@ -382,6 +416,21 @@
     P.v3('uBoxCenter', farm.center);
     P.v3('uBoxHalf', farm.half);
     P.tex('uSDF', farm.sdf.tex, gl.TEXTURE_3D);
+    //  Where the water soaked in. Shares the SDF box exactly, so uSdfMin and
+    //  uSdfMax below serve both samplers.
+    //
+    //  A farm without a volume - an old save, or one built before AF.Wet
+    //  existed - still has to bind SOMETHING. An unbound sampler3D reads
+    //  texture unit 0, which bindShadow has already filled with the 2D
+    //  shadow map, and what a sampler returns when no texture of its own
+    //  target is bound there is not worth relying on. One black texel is.
+    //
+    //  Built in R.init, NOT lazily here. GLX.texture3D finishes with
+    //  bindTexture(TEXTURE_3D, null), and Program.tex leaves its unit
+    //  active - so creating it at this point would unbind the SDF that the
+    //  line above had just bound, on that same unit, and the soil would
+    //  raymarch an empty field for the one frame it happened on.
+    P.tex('uWetVol', (farm.wet && farm.wet.tex) || R.zeroVol, gl.TEXTURE_3D);
     P.v3('uSdfMin', farm.sdfMin);
     P.v3('uSdfMax', farm.sdfMax);
     P.v3('uSoilA', farm.soilA);

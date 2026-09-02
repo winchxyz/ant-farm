@@ -78,6 +78,13 @@
     this.selection = [];
     this.buildType = -1;
     this.result = null;
+    //  A new colony starts with a clean record. main.js seeds these once at
+    //  module load, so without this the overlay's "(N kept)" count and the
+    //  identical-stack rule both span every run since the page opened - and
+    //  a stack from the previous colony would be counted as a repeat.
+    this.lastError = null;
+    if (this.errorLog) this.errorLog.length = 0;
+    if (this.clearErrors && this.state === 'error') this.clearErrors();
     this.grains = [];
     this.eventTimer = 30;
     this.predTimer = 90;
@@ -87,6 +94,13 @@
       var gx = 96, gy = 60, gz = 56;
       if (opts.quality === 'low') { gx = 64; gy = 40; gz = 36; }
       f.sdf = R.createSDF(gx, gy, gz);
+      //  Where water has soaked in. Shares the SDF world box exactly, which
+      //  is what lets the soil shader sample both with one pair of
+      //  uSdfMin/uSdfMax uniforms. It is NOT scaled down on low quality: at
+      //  108 KB it is already a rounding error next to the SDF, and the
+      //  field is low frequency by construction - a damp patch is metres
+      //  wide - so there is nothing to gain by coarsening it further.
+      f.wet = AF.Wet ? AF.Wet.create(f) : null;
       this.generateProps(f);
     }
 
@@ -246,6 +260,312 @@
       var ts = spot(2.4);
       add('twig', ts[0], ts[1], 0.55, 1.25);
     }
+  };
+
+  // ==================================================================
+  //  HOW A PROP IS DRAWN, AND THEREFORE HOW SOLID IT IS
+  // ==================================================================
+  //  Stone collision has been written three times and reported broken three
+  //  times, and the reason is always the same: the collider invented its own
+  //  idea of how big a prop is. Both movers used a single multiple of
+  //  prop.scale for every kind, while pushProps draws each kind at a
+  //  DIFFERENT instance scale against a DIFFERENT mesh. Measured off the
+  //  vertex buffers (Batch.meshR, renderer.js) times the instance scale
+  //  pushProps uses:
+  //
+  //    kind      instance scale   mesh XZ radius   drawn radius
+  //    bigrock   p.scale          0.898  B.pebble    0.898*p.scale
+  //    pebble    p.scale * 0.55   0.895  B.pebbleSm  0.492*p.scale
+  //    leaf      p.scale          1.258  B.leaf      1.258*p.scale
+  //    mushroom  p.scale          0.584  B.mushroom  0.584*p.scale
+  //    twig      p.scale * 0.70   2.423  B.twig      1.696*p.scale
+  //
+  //  A bigrock is rng.range(1.1, 2.1), so the biggest stone in the tank is
+  //  1.886 units across the middle while the old collider defended 1.302.
+  //  With its body term a worker ant was parked 1.520 from the centre of an
+  //  outline 1.886 wide - the whole animal inside the silhouette of the most
+  //  conspicuous object on screen. Every species did it: centipede 0.164
+  //  inside, woodlouse 0.185, beetle 0.206, spider 0.324, worker 0.366.
+  //
+  //  The same table fixes the error pointing the other way. A leaf is a flat
+  //  thing 0.344*p.scale tall lying on the sand and was fenced off by a disc
+  //  up to 0.90 wide; the jungle biome scatters seventy of them. A twig is a
+  //  stick 0.05 thick whose ORIGIN IS AT ONE END - its mesh runs 0..2.376 in
+  //  z - so a disc at p.x,p.z describes nothing about it: wide enough to
+  //  cover the stick it fences four times its footprint, narrow enough to
+  //  match the stick it blocks only the butt. Both are things you walk over.
+  //  A mushroom is a 0.070-radius stem holding a cap an ant walks under, so
+  //  it blocks at the stem and nowhere else.
+  //
+  //    s     - instance scale multiplier, exactly what pushProps passes
+  //    yMul  - lift proportional to p.scale, likewise
+  //    yAdd  - flat lift, likewise
+  //    solid - does a walking body collide with it
+  //    rFix  - mesh-space blocking radius that OVERRIDES the silhouette,
+  //            for the one kind whose outline is not what stops you.
+  //
+  //  If you change how a prop is drawn, you change this table, and the
+  //  collision follows. That is the entire point.
+  Game.PROP_DRAW = {
+    grass: { batch: 'grass', s: 1.00, yMul: 0, yAdd: 0, solid: 0 },
+    leaf: { batch: 'leaf', s: 1.00, yMul: 0, yAdd: 0.04, solid: 0 },
+    //  Blocked at its silhouette like everything else. An earlier draft
+    //  pinned this to the 0.070 stem on the grounds that an ant walks under
+    //  the cap - but the cap is not over the stem. buildMushroom never
+    //  resets the builder rotation after building the stem limb, so the cap
+    //  inherits it and comes out as a vertical disc lying on the sand behind
+    //  the stem (measured bbox y -0.226..0.462, z -0.584..0.067). Until that
+    //  mesh is fixed the visible object IS the disc on the ground, and
+    //  blocking a 0.07 stem in the middle of it would be the same bug this
+    //  whole table exists to remove: defending a circle that is not the one
+    //  on screen.
+    mushroom: { batch: 'mushroom', s: 1.00, yMul: 0, yAdd: 0, solid: 1 },
+    pebble: { batch: 'pebbleSm', s: 0.55, yMul: 0.20, yAdd: 0, solid: 1 },
+    bigrock: { batch: 'pebble', s: 1.00, yMul: 0.35, yAdd: 0, solid: 1 },
+    //  A CAPSULE, not a disc - the one prop whose origin is not its centre.
+    //
+    //  buildTwig runs a limb from z 0 to z 2.376 with three branches off the
+    //  far end; measured radius grows 0.075 at the butt to 0.70 in the
+    //  branches. At instance scale 0.70 that is a stick 1.7 long and half a
+    //  unit tall - taller than a worker ant, and a real obstacle. A disc at
+    //  p.x,p.z can describe none of it: sized to cover the stick it fences
+    //  four times its footprint, sized to the stick it blocks only the butt.
+    //  So `seg` is the mesh-space length along the local +z axis and `rad`
+    //  the mesh-space thickness, and the resolver treats it as a segment.
+    //  0.30 is the MEAN distance of the mesh from that axis, measured after
+    //  the fact by transforming buildTwig(4) through the same instance
+    //  transform the shader uses and projecting onto the axis: mean 0.215
+    //  world units at instance scale 0.714, max 0.413 out at the branch
+    //  tips. Blocking at the mean leaves the tips passable, which is right -
+    //  they are twigs, and an ant pushes past them rather than walking round.
+    twig: { batch: 'twig', s: 0.70, yMul: 0, yAdd: 0.08, solid: 1, seg: 2.376, rad: 0.30 }
+  };
+
+  //  Blocking radius of one prop in world units, body NOT included.
+  //
+  //  This is the silhouette radius, not the radius where the stone meets the
+  //  sand. A bigrock is drawn at p.y + 0.35*s against a mesh spanning
+  //  -0.685..0.678, so it is buried 0.335*s and stands 1.03*s proud; its
+  //  widest ring sits 0.35*s above the sand and the ring at the sand line is
+  //  about 0.73*s. Blocking at the silhouette therefore over-blocks the base
+  //  by 0.17*s, and that is deliberate: nothing in the game raises a body
+  //  onto a prop (localTop is the bare heightfield), so going round is the
+  //  only correct answer, and the player judges "inside the stone" against
+  //  the outline they can see, not against a contact ring they cannot.
+  Game.propBlockR = function (p) {
+    var S = Game.PROP_DRAW[p.kind];
+    if (!S || !S.solid) return 0;
+    if (S._r === undefined) {
+      //  A capsule carries its own thickness; the mesh silhouette radius
+      //  would be half the stick's LENGTH and means nothing here.
+      if (S.rad !== undefined) S._r = S.rad * S.s;
+      else if (R.B && R.B[S.batch]) S._r = R.B[S.batch].meshR * S.s;
+      //  No renderer yet (headless harness). Answer, but do not cache a
+      //  guess where the measured value belongs.
+      else return 0.9 * S.s * p.scale;
+    }
+    return S._r * p.scale;
+  };
+
+  //  Where a capsule prop's axis ends, relative to its origin. Zero for the
+  //  round props, which are their own axis.
+  //
+  //  eulerM in shaders.js is column-major, so Ry*(0,0,1) is
+  //  (sin yaw, 0, cos yaw) - and pushProps hands p.rot in as yaw with pitch
+  //  and roll zero. That is the whole convention, and getting it wrong would
+  //  put an invisible fence beside the twig instead of on it.
+  Game.propAxis = function (p, out) {
+    var S = Game.PROP_DRAW[p.kind];
+    if (!S || !S.seg) { out[0] = 0; out[1] = 0; return false; }
+    var L = S.seg * S.s * p.scale;
+    out[0] = Math.sin(p.rot) * L;
+    out[1] = Math.cos(p.rot) * L;
+    return true;
+  };
+
+  //  Largest blocking radius on this farm, for the broad-phase cull. Derived,
+  //  never written down: the old culls were the literals 9 (ants, a squared
+  //  3.0) and 2.2 + d.scale (creatures). Both happened to still cover the old
+  //  radii, with 1.11 and 0.90 units to spare - but a literal that has to
+  //  stay ahead of a radius maintained in another file is the same trap as
+  //  the radius itself, one release away from silently skipping a prop the
+  //  body is standing in.
+  Game.propReach = function (farm) {
+    var props = farm.props;
+    if (farm._reachN === props.length && farm._reachR !== undefined) return farm._reachR;
+    var mx = 0, _ax = [0, 0];
+    for (var i = 0; i < props.length; i++) {
+      var r = Game.propBlockR(props[i]);
+      //  A capsule reaches its own length past its origin, and the broad
+      //  phase measures from the origin, so the reach has to carry it.
+      if (r > 0 && Game.propAxis(props[i], _ax)) {
+        r += Math.sqrt(_ax[0] * _ax[0] + _ax[1] * _ax[1]);
+      }
+      if (r > mx) mx = r;
+    }
+    farm._reachN = props.length;
+    farm._reachR = mx;
+    return mx;
+  };
+
+  //  THE ONE PUSH-OUT. Everything that walks on the surface calls this.
+  //
+  //  pos is moved in place out of any solid prop and clamped inside the
+  //  glass. fromX/fromZ are where the body started this frame; pass them and
+  //  the first pass tests the whole STEP rather than only its endpoint.
+  //
+  //  Four things the two hand-rolled loops it replaces got wrong:
+  //
+  //  1. SWEEP, not a point test. dt is min(rawDt, 0.05) * sim.speed and
+  //     sim.speed clamps at 8, so a frame is up to 0.40s: a scout covers
+  //     1.95 units in one of them and a centipede 1.68. Against the true
+  //     radii that is wider than every prop in the tank except a large
+  //     bigrock - a small pebble's blocking circle is 0.68 across - so the
+  //     body starts outside, ends outside, and the endpoint test sees clean
+  //     sand while the animal passed straight through the stone. Testing the
+  //     closest approach of the segment catches it, and because the closest
+  //     point on the line is already the tangential one, the body still
+  //     slides round the obstacle instead of stopping dead on it.
+  //
+  //  2. DEEPEST FIRST, then look again. The old loops resolved props in
+  //     array order and let the last one win, so a push out of one prop
+  //     could shove a body into another that had already been checked -
+  //     pebbles are scattered in overlapping drifts, so that is the normal
+  //     case rather than a corner one. Three passes handle a body wedged
+  //     between three props, which is as deep as a tank this sparse goes.
+  //
+  //  3. CLAMP INSIDE THE LOOP. The old creature code clamped to the glass
+  //     and THEN pushed out of stones, so a push-out could leave an animal
+  //     outside the tank with nothing left to catch it. Clamping first is no
+  //     better on its own: a pebble centre sits as close as 0.9 to the pane
+  //     while the creature clamp line is 0.8, so the clamp can put a body
+  //     0.1 past the pebble's centre. Doing both every iteration is what
+  //     makes a prop that close to the glass resolvable at all - the next
+  //     pass simply pushes it out the other side.
+  //
+  //  4. A BODY ON THE AXIS. `if (od < 1e-6) continue` abandoned anything
+  //     that ended up exactly on a prop's centre line, leaving it inside for
+  //     good. Back it out the way it came instead.
+  //
+  //  Cost: it only ever looks at solid props, so the jungle tank's 654-prop
+  //  list shrinks to 68 candidates and this is cheaper per body than the
+  //  loop it replaces even at three passes.
+  //  Nearest point on a capsule's axis to (x,z), clamped to the segment.
+  var _axis = [0, 0], _near = [0, 0];
+  function capNear(pr, ax, x, z, out) {
+    var L2 = ax[0] * ax[0] + ax[1] * ax[1];
+    var t = L2 > 1e-9 ? ((x - pr.x) * ax[0] + (z - pr.z) * ax[1]) / L2 : 0;
+    if (t < 0) t = 0; else if (t > 1) t = 1;
+    out[0] = pr.x + ax[0] * t;
+    out[1] = pr.z + ax[1] * t;
+  }
+
+  Game.resolveProps = function (farm, pos, bodyR, hx, hz, fromX, fromZ) {
+    var props = farm && farm.props;
+    var cx0 = farm.center[0] - hx, cx1 = farm.center[0] + hx;
+    var cz0 = farm.center[2] - hz, cz1 = farm.center[2] + hz;
+    if (!props || !props.length) {
+      pos[0] = M.clamp(pos[0], cx0, cx1);
+      pos[2] = M.clamp(pos[2], cz0, cz1);
+      return 0;
+    }
+    if (fromX === undefined) { fromX = pos[0]; fromZ = pos[2]; }
+    var reach = Game.propReach(farm) + bodyR;
+    //  Broad phase: the step's bounding box grown by three times the largest
+    //  blocking circle. Two of those cover the later passes - after a push
+    //  the body sits at most `reach` from a prop whose centre was already in
+    //  the box, so anything that can still contain it has its centre within
+    //  2*reach of the box - and the third is slack for the glass clamp.
+    var box = reach * 3;
+    var lox = Math.min(fromX, pos[0]) - box, hix = Math.max(fromX, pos[0]) + box;
+    var loz = Math.min(fromZ, pos[2]) - box, hiz = Math.max(fromZ, pos[2]) + box;
+    var moved = 0, pass, i;
+    for (pass = 0; pass < 3; pass++) {
+      var hit = null, deepest = 0, qbx = 0, qbz = 0, hneed = 0;
+      var hcx = 0, hcz = 0;
+      for (i = 0; i < props.length; i++) {
+        var pr = props[i];
+        if (pr.x < lox || pr.x > hix || pr.z < loz || pr.z > hiz) continue;
+        var br = Game.propBlockR(pr);
+        if (br <= 0) continue;
+        var need = br + bodyR;
+        //  A round prop is its own centre; a capsule's is whichever point on
+        //  its axis is nearest the body, recomputed per query because the
+        //  body moves along it.
+        var ccx = pr.x, ccz = pr.z;
+        var isCap = Game.propAxis(pr, _axis);
+        //  THE ENDPOINT FIRST, the swept segment only as a tunnelling guard.
+        //
+        //  Resolving every contact at the segment's closest approach to the
+        //  prop looks tidier but is wrong for the common case: a body that
+        //  merely GRAZES a stone gets relocated back to the point of closest
+        //  approach and loses the rest of its travel - up to a full `need`
+        //  sideways in one frame at high game speed, for a body that was
+        //  never going to end up inside anything. So: if the step ENDS
+        //  inside the prop, resolve the endpoint, exactly as a point test
+        //  would. Only when the endpoint is clear and the segment still
+        //  passed through do we fall back to the closest-approach point -
+        //  which is the case the endpoint test cannot see at all, and the
+        //  reason the sweep is here.
+        if (isCap) capNear(pr, _axis, pos[0], pos[2], _near);
+        else { _near[0] = pr.x; _near[1] = pr.z; }
+        var ox = pos[0] - _near[0], oz = pos[2] - _near[1];
+        var od = ox * ox + oz * oz;
+        var qx = pos[0], qz = pos[2];
+        ccx = _near[0]; ccz = _near[1];
+        if (od >= need * need) {
+          if (pass !== 0) continue;
+          var sx = pos[0] - fromX, sz = pos[2] - fromZ;
+          var ss = sx * sx + sz * sz;
+          if (ss <= 1e-8) continue;
+          var t = ((ccx - fromX) * sx + (ccz - fromZ) * sz) / ss;
+          if (t <= 0 || t >= 1) continue;          // nearest point is an endpoint; already tested
+          qx = fromX + sx * t; qz = fromZ + sz * t;
+          if (isCap) { capNear(pr, _axis, qx, qz, _near); ccx = _near[0]; ccz = _near[1]; }
+          ox = qx - ccx; oz = qz - ccz;
+          od = ox * ox + oz * oz;
+          if (od >= need * need) continue;         // the step really did miss
+        }
+        var pen = need - Math.sqrt(od);
+        if (pen > deepest) {
+          deepest = pen; hit = pr; qbx = qx; qbz = qz; hneed = need;
+          hcx = ccx; hcz = ccz;
+        }
+      }
+      if (!hit) break;
+      //  Which way out. Normally straight out along the line from the
+      //  stone's centre, so the body slides round rather than stopping dead.
+      //
+      //  Near the centre that line is noise: at 1% of `need` the direction
+      //  is decided by float rounding, and the body is then flung a full
+      //  radius along it, differently every frame. The old guard only caught
+      //  an EXACT centre hit (1e-4), which never happens, so the noisy band
+      //  was live and the exact case it did catch fell through to an
+      //  arbitrary away-from-the-tank-centre shove of up to `need`.
+      //
+      //  So the threshold is a fraction of the radius, not an epsilon, and
+      //  the first fallback is the way the body CAME - back it out along its
+      //  own path, which is the only direction that means anything to a body
+      //  that has driven into the middle of a stone.
+      var ax = qbx - hcx, az = qbz - hcz;
+      var al = Math.sqrt(ax * ax + az * az);
+      if (al < hneed * 0.02) {
+        ax = fromX - hcx; az = fromZ - hcz;
+        al = Math.sqrt(ax * ax + az * az);
+        if (al < hneed * 0.02) {
+          ax = hcx - farm.center[0]; az = hcz - farm.center[2];
+          al = Math.sqrt(ax * ax + az * az) || 1;
+        }
+      }
+      pos[0] = M.clamp(hcx + ax / al * hneed, cx0, cx1);
+      pos[2] = M.clamp(hcz + az / al * hneed, cz0, cz1);
+      moved = 1;
+    }
+    if (!moved) {
+      pos[0] = M.clamp(pos[0], cx0, cx1);
+      pos[2] = M.clamp(pos[2], cz0, cz1);
+    }
+    return moved;
   };
 
   Game.ITEMS = {
@@ -655,6 +975,20 @@
     //  solver is an instant blow-up, and fast-forwarding water is not a
     //  feature anyone asked for.
     if (AF.PS) AF.PS.step(rawDt, this);
+    //  Dry out the damp patches and push whatever changed to the GPU.
+    //
+    //  This deliberately does NOT live inside PS.step. That function returns
+    //  before it does anything when there are no particles left
+    //  (`if (!farm || count === 0) ... return`), and that is precisely the
+    //  moment the last drop has soaked away: put the tick in there and the
+    //  stain freezes at full strength and never fades. Being inside the
+    //  `dt <= 0` pause gate above is correct, though - a paused tank should
+    //  not dry out.
+    if (AF.Wet) {
+      for (var _wf = 0; _wf < this.world.farms.length; _wf++) {
+        AF.Wet.tick(this.world.farms[_wf], rawDt);
+      }
+    }
     //  The sugar heap settles on real time too, for the same reason the
     //  solver does: at 8x the relaxation would overshoot and ring.
     if (AF.Heap) {

@@ -186,6 +186,41 @@
   Input.prototype.shift = function () { return !!this.keys['shift']; };
   Input.prototype.ctrl = function () { return !!this.keys['control'] || !!this.keys['meta']; };
   Input.prototype.alt = function () { return !!this.keys['alt']; };
+
+  //  IS THIS DRAG A CAMERA GESTURE?
+  //
+  //  One question, asked in one place, because four separate consumers need
+  //  the same answer and used to each carry their own half of it. Rig.update
+  //  owns the pan; the selection rectangle in main.js, the shovel's
+  //  hold-to-dig in excavate.js, the watering can's hold-to-pour and the
+  //  click dispatcher in player.js all have to stand down while it is
+  //  happening. They tested `ctrl() || alt()` - which covers Ctrl+drag and
+  //  the Alt orbit and misses Space+drag, middle-drag and Shift+right-drag
+  //  entirely.
+  //
+  //  It never showed, because panning threw a ReferenceError on its first
+  //  frame (see the note in Rig.update) and the game died before anything
+  //  downstream could misbehave. Making pan work exposes all of it at once:
+  //  with the shovel in hand, a Space+drag would have dug a trench along
+  //  the path of the camera move, and a Ctrl+drag would have drawn a
+  //  selection box across the whole tank.
+  //
+  //  `pan` is the grab-the-world gesture; `orbit` is the turntable. Both
+  //  suppress tools, so `camGesture` is what a tool should ask.
+  Input.prototype.panGesture = function () {
+    return this.drag.active &&
+      (this.drag.button === 1 || this.mouse.mdown ||
+        (this.drag.button === 0 && (this.ctrl() || this.key(' '))) ||
+        (this.drag.button === 2 && this.shift()));
+  };
+  Input.prototype.orbitGesture = function () {
+    return !this.panGesture() && this.drag.active &&
+      ((this.drag.button === 2 && this.drag.moved > 5) ||
+        (this.drag.button === 0 && this.alt()));
+  };
+  Input.prototype.camGesture = function () {
+    return this.panGesture() || this.orbitGesture();
+  };
   IN.Input = Input;
 
   // ------------------------------------------------------------------
@@ -326,21 +361,45 @@
     if (input.key('e')) this.wantYaw += dt * 1.5;
 
     // ---------- mouse pan : grab the world ----------
-    var panning = input.drag.active &&
-      (input.drag.button === 1 || input.mouse.mdown ||
-        (input.drag.button === 0 && (input.ctrl() || input.key(' '))) ||
-        (input.drag.button === 2 && input.shift()));
+    //  The predicate lives on Input now, because the shovel, the watering
+    //  can, the click dispatcher and the selection rectangle all have to
+    //  know about it too. See Input.prototype.panGesture.
+    var panning = input.panGesture();
     if (panning && (input.dx || input.dy)) {
       var s = this.dist * 0.0017 * o.panSpeed;
-      this.wantFocus[0] -= rx * input.dx * s;
-      this.wantFocus[2] -= rz * input.dx * s;
+      //  PAN HAD NOTHING TO PAN ALONG.
+      //
+      //  These two lines read `rx` and `rz`. No such variables exist - not
+      //  in this function, not in this file, not on window. Reading an
+      //  unbound identifier is a ReferenceError, so every middle-drag,
+      //  Ctrl+drag, Space+drag and Shift+right-drag that actually moved the
+      //  mouse threw out of Rig.update, out of Game.update, and into the
+      //  frame try/catch in main.js - which set state 'error' and put the
+      //  boot overlay back up for good. Panning is a documented control (the
+      //  manual says Middle-drag Pan, and player.js already skips clicks it
+      //  believes were pans), so this is not an obscure corner: it has simply
+      //  never worked once since the first commit.
+      //
+      //  It has never shown up in a measurement either, and it never can
+      //  with the harness as it stands: AF.__loop is driven with no mouse at
+      //  all, so drag.active is false and input.dx is zero, and this branch
+      //  is dead in every frame ever stepped headlessly.
+      //
+      //  What was missing is the camera right axis flattened onto the
+      //  ground. It cannot borrow rgtX/rgtZ from the keyboard block above:
+      //  those are computed inside `if (kx || kz || kyUp)`, so with no key
+      //  held they are var-hoisted and undefined, and using them would have
+      //  turned a loud ReferenceError into a silent NaN focus - a strictly
+      //  worse bug. Same expression, derived here, so the two stay in step.
+      var rgX = Math.cos(this.yaw), rgZ = -Math.sin(this.yaw);
+      this.wantFocus[0] -= rgX * input.dx * s;
+      this.wantFocus[2] -= rgZ * input.dx * s;
       this.wantFocus[1] += input.dy * s;
       this.mode = 'free'; this.follow = null;
     }
 
     // ---------- mouse orbit ----------
-    var orbiting = !panning && input.drag.active &&
-      ((input.drag.button === 2 && input.drag.moved > 5) || (input.drag.button === 0 && input.alt()));
+    var orbiting = input.orbitGesture();
     if (orbiting && (input.dx || input.dy)) {
       var os = 0.0055 * o.orbitSpeed;
       this.wantYaw += (o.invertX ? -1 : 1) * input.dx * os;

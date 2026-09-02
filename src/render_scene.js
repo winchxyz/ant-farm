@@ -344,48 +344,64 @@
     var camDist2 = v3.dist2(cam.pos, farm.center);
     var far = camDist2 > 90 * 90;
     var tint = farm.biome.soilTop;
+    var PD = Game.PROP_DRAW;
     for (var i = 0; i < farm.props.length; i++) {
       var p = farm.props[i];
       var d2 = (p.x - cam.pos[0]) * (p.x - cam.pos[0]) + (p.z - cam.pos[2]) * (p.z - cam.pos[2]);
       if (far && (i % 3)) continue;
       if (d2 > 8000) continue;
+      //  Instance scale and lift come out of Game.PROP_DRAW, which is the
+      //  same table Game.propBlockR reads to decide how solid the thing is.
+      //  These used to be loose magic numbers here - 0.55 for a pebble, 1.0
+      //  for a bigrock, 0.7 for a twig - against a single 0.62*prop.scale in
+      //  the collision code, and the gap between them is why animals walked
+      //  through the big stones for three releases. Change how a prop is
+      //  drawn by editing the table and the collision changes with it.
+      //
+      //  (The LOD culls two lines up are a genuine remaining divergence:
+      //  past 89 units two thirds of the props are not drawn but are still
+      //  solid. At that zoom the tank is a thumbnail, so it is left alone.)
+      var S = PD[p.kind];
+      if (!S) continue;
+      var sc = p.scale * S.s;
+      var py = p.y + p.scale * S.yMul + S.yAdd;
       var g = 0;
       switch (p.kind) {
         case 'grass':
           // hue rides in the `variant` slot so the shader can de-correlate
           // veins, scorch and sway per blade
-          (i % 2 ? B.grass2 : B.grass).push(p.x, p.y, p.z, p.scale,
+          (i % 2 ? B.grass2 : B.grass).push(p.x, py, p.z, sc,
             p.rot, 0, 0, 0, 0, 0, 0, p.hue,
             0.185 + p.hue * 0.170, 0.430 + p.hue * 0.320, 0.105 + p.hue * 0.090, 0.42,
             1, 0, 0, 0);
           break;
         case 'leaf':
-          B.leaf.push(p.x, p.y + 0.04, p.z, p.scale,
+          B.leaf.push(p.x, py, p.z, sc,
             p.rot, p.tilt, 0, 0, 0, 0, 0, p.hue,
             0.255 + p.hue * 0.280, 0.395 + p.hue * 0.270, 0.115 + p.hue * 0.060, 0.38,
             1, 0, 0, 0);
           break;
         case 'mushroom':
           g = farm.biome.humid > 0.6 ? 0.28 : 0.05;
-          B.mushroom.push(p.x, p.y, p.z, p.scale,
+          B.mushroom.push(p.x, py, p.z, sc,
             p.rot, 0, 0, 0, 0, 0, 0, p.hue,
             0.40 + p.hue * 0.24, 0.33 + p.hue * 0.17, 0.27 + p.hue * 0.19, 0.62,
             1, 0, g, 0);
           break;
         case 'pebble':
-          B.pebbleSm.push(p.x, p.y + p.scale * 0.2, p.z, p.scale * 0.55,
+          B.pebbleSm.push(p.x, py, p.z, sc,
             p.rot, p.tilt, 0, 0, 0, 0, 0, 0,
             tint[0] * (0.7 + p.hue * 0.8), tint[1] * (0.7 + p.hue * 0.8), tint[2] * (0.7 + p.hue * 0.8), 0.68,
             1, 0, 0, 0);
           break;
         case 'bigrock':
-          B.pebble.push(p.x, p.y + p.scale * 0.35, p.z, p.scale,
+          B.pebble.push(p.x, py, p.z, sc,
             p.rot, p.tilt * 0.4, 0, 0, 0, 0, 0, 0,
             tint[0] * 0.85, tint[1] * 0.85, tint[2] * 0.88, 0.74,
             1, 0, 0, 0);
           break;
         case 'twig':
-          B.twig.push(p.x, p.y + 0.08, p.z, p.scale * 0.7,
+          B.twig.push(p.x, py, p.z, sc,
             p.rot, 0, 0, 0, 0, 0, 0, 0,
             0.16, 0.11, 0.065, 0.80,
             1, 0, 0, 0);
@@ -577,8 +593,32 @@
     }
   };
 
-  //  Damp soil under each pool, multiplied into the ground.
+  //  Damp soil under each pool - RETIRED, superseded by the wetness volume
+  //  (AF.Wet in src/particles.js, sampled by SOIL_FS).
+  //
+  //  Three reasons this had to go rather than stay alongside it:
+  //
+  //  It is keyed off PS.clusters, which are rebuilt from ALIVE particles, so
+  //  the damp ring vanished in the same step as the last drop - the exact
+  //  moment the ground is supposed to look wet.
+  //
+  //  It is a flat quad at farm.localTop(), the analytic heightfield. Inside
+  //  a dug Water Pit - the one chamber built for holding water - that puts
+  //  the disc in mid-air at the old ground level, and on a tunnel wall it
+  //  cannot appear at all.
+  //
+  //  And running both would double-darken. This quad is 35% wider than its
+  //  cluster and the volume splats spread about a cell past the water edge,
+  //  so the two overlap in a ring around every pool that would be multiplied
+  //  by roughly 0.55 twice. The volume already covers the whole footprint,
+  //  including the part under the water that the water hides anyway.
+  //
+  //  R.drawWet, S.WET_FS and the R.B.wet batch are left in place and cost
+  //  nothing while the batch stays empty (drawWet returns on n === 0), so
+  //  restoring the old behaviour is a matter of deleting the return below.
   Game.pushWet = function (cam) {
+    return;
+    /* eslint-disable no-unreachable */
     var PS = AF.PS;
     if (!PS || !PS.clusters) return;
     var B = R.B;
@@ -595,6 +635,7 @@
         1, 1, 1, Math.min(0.75, 0.25 + c.n * 0.012),
         0, 0, 0, 0);
     }
+    /* eslint-enable no-unreachable */
   };
 
   // ------------------------------------------------------------------

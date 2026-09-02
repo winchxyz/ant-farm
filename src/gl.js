@@ -254,6 +254,31 @@
     return t;
   };
 
+  //  Replace one axis-aligned box of texels inside a 3D texture.
+  //
+  //  The wetness volume (AF.Wet, src/particles.js) is 90x40x30 and only ever
+  //  changes in the small neighbourhood somebody just poured on, so pushing
+  //  the whole 108,000-texel field every time would be almost entirely
+  //  wasted bandwidth. `data` must be packed tight - width*height*depth
+  //  bytes with no gaps - which is why the caller keeps a staging buffer
+  //  rather than handing over a window into the full field.
+  //
+  //  UNPACK_ALIGNMENT is not a nicety here. An R8 texture is one byte per
+  //  texel, so a sub-box five cells wide is a five-byte row; at the default
+  //  alignment of 4 the driver expects every row padded to eight bytes,
+  //  finds the buffer too short and rejects the call with INVALID_OPERATION
+  //  - the upload does nothing and the ground never darkens. It is put back
+  //  to 4 immediately because every other upload in the engine assumes the
+  //  default is untouched.
+  GLX.texture3DSub = function (t, x, y, z, w, h, d, data, format, type) {
+    gl.bindTexture(gl.TEXTURE_3D, t);
+    gl.pixelStorei(gl.UNPACK_ALIGNMENT, 1);
+    gl.texSubImage3D(gl.TEXTURE_3D, 0, x, y, z, w, h, d,
+      format || gl.RED, type || gl.UNSIGNED_BYTE, data);
+    gl.pixelStorei(gl.UNPACK_ALIGNMENT, 4);
+    gl.bindTexture(gl.TEXTURE_3D, null);
+  };
+
   // ------------------------------------------------------------------
   //  Framebuffer
   // ------------------------------------------------------------------

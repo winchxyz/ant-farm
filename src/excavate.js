@@ -248,7 +248,12 @@
     g.afford = this.player.biomass >= DIG_COST;
 
     _digT -= dt;
-    if (inp.mouse.down && !inp.uiHover && _digT <= 0) {
+    //  Not while the camera is being moved. Ctrl+left-drag and Space+left-drag
+    //  are pans (see Input.prototype.panGesture), and this test used to be
+    //  `mouse.down` alone - so dragging the view with the shovel in hand
+    //  would have carved a trench along the whole camera path. It never
+    //  surfaced only because panning threw before it could.
+    if (inp.mouse.down && !inp.uiHover && !inp.camGesture() && _digT <= 0) {
       _digT = DIG_INTERVAL;
       this.digScoop(farm, hit[0], hit[1] - DIG_R * 0.35, hit[2]);
     }

@@ -169,7 +169,9 @@
     if (this.pourType) {
       this.updatePourGhost(ray);
       //  hold to keep pouring: a stream you can aim, not a one-shot handful
-      if (inp.mouse.down && this.pourGhost && !inp.uiHover) {
+      //  Same guard the shovel needs: a Ctrl or Space drag is the camera,
+      //  not a request to empty the watering can along the way.
+      if (inp.mouse.down && this.pourGhost && !inp.uiHover && !inp.camGesture()) {
         var pf = this.player.farms[0] || this.activeFarm;
         this.pourStream(this.pourType, this.pourGhost.impact[0],
           this.pourGhost.impact[2], pf, dt);
@@ -181,7 +183,9 @@
       var c = inp.clicks[i];
       if (this.ui.consumeClick) { this.ui.consumeClick = false; continue; }
       if (c.button === 0) {
-        if (inp.ctrl() || inp.alt()) continue;      // that drag was a pan / orbit
+        //  that drag was a pan or an orbit - ask the one predicate rather
+        //  than re-deriving half of it here (Space+drag pans too)
+        if (inp.camGesture() || inp.ctrl() || inp.alt()) continue;
         this.onLeftClick(c, ray);
       } else if (c.button === 2) {
         if (c.moved > 7) continue;                  // that was an orbit
