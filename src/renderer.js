@@ -282,6 +282,11 @@
     if (R.width === w && R.height === h) return;
     R.width = w; R.height = h; R.dpr = dpr;
     R.canvas.width = w; R.canvas.height = h;
+    //  three keeps its own viewport and has to be told. setDrawingBufferSize
+    //  is the one sizing entry point with no updateStyle branch, so it
+    //  cannot write inline style onto the canvas - css/ui.css owns that box
+    //  and the pick maths reads it (brief L12, B30).
+    if (R.three) R.three.setDrawingBufferSize(w, h, 1);
 
     var i;
     if (R.sceneFB) {
@@ -300,11 +305,11 @@
     var R8 = { internalFormat: gl.R8, format: gl.RED, type: gl.UNSIGNED_BYTE };
     R.aoFB = mkFBO({ width: aw, height: ah, color: [R8] });
     R.aoFB2 = mkFBO({ width: aw, height: ah, color: [R8] });
-    R.dofA = new GLX.FBO({ width: aw, height: ah, color: [F16] });
-    R.dofB = new GLX.FBO({ width: aw, height: ah, color: [F16] });
+    R.dofA = mkFBO({ width: aw, height: ah, color: [F16] });
+    R.dofB = mkFBO({ width: aw, height: ah, color: [F16] });
     var rw = Math.max(1, w >> 2), rh = Math.max(1, h >> 2);
-    R.raysFB = new GLX.FBO({ width: rw, height: rh, color: [F16] });
-    R.raysFB2 = new GLX.FBO({ width: rw, height: rh, color: [F16] });
+    R.raysFB = mkFBO({ width: rw, height: rh, color: [F16] });
+    R.raysFB2 = mkFBO({ width: rw, height: rh, color: [F16] });
     R.compFB = mkFBO({ width: w, height: h, color: [{ internalFormat: gl.RGBA8, format: gl.RGBA, type: gl.UNSIGNED_BYTE }] });
     if (AF.WR && AF.WR.ready) AF.WR.resize(w, h);
     R.bloom = []; R.bloomUp = [];
@@ -340,13 +345,43 @@
       }
       R.T3bloom = T;
       if (!R.brightPass) {
+        var V2 = function () { return new THREE.Vector2(1, 1); };
+        var V3 = function () { return new THREE.Vector3(); };
+        var M4 = function () { return new THREE.Matrix4(); };
         R.brightPass = AF.T3.pass('bright', SP.BRIGHT_FS,
           { uTex: null, uThreshold: 1.45, uSoft: 0.7 });
         R.downPass = AF.T3.pass('down', SP.DOWN_FS,
-          { uTex: null, uTexel: new THREE.Vector2(1, 1) });
+          { uTex: null, uTexel: V2() });
         R.upPass = AF.T3.pass('up', SP.UP_FS,
-          { uTex: null, uPrev: null, uTexel: new THREE.Vector2(1, 1), uScatter: 1 });
+          { uTex: null, uPrev: null, uTexel: V2(), uScatter: 1 });
         R.copyPass = AF.T3.pass('copy', SP.COPY_FS, { uTex: null });
+        R.copyPass2 = AF.T3.pass('copy2', SP.COPY_FS, { uTex: null });
+        R.ssaoPass = AF.T3.pass('ssao', SP.SSAO_FS, {
+          uDepth: null, uNormal: null, uInvProj: M4(), uProj: M4(), uView: M4(),
+          uRes: V2(), uRadius: 0.55, uStrength: 1, uTime: 0
+        });
+        R.blurPass = AF.T3.pass('blur', SP.BLUR_FS,
+          { uTex: null, uDepth: null, uDir: V2(), uTexel: V2() });
+        R.cocPass = AF.T3.pass('coc', SP.COC_FS, {
+          uColor: null, uDepth: null, uNear: 0.35, uFar: 420,
+          uFocus: 1, uAperture: 1, uMaxCoC: 1
+        });
+        R.dofPass = AF.T3.pass('dof', SP.DOF_FS,
+          { uTex: null, uTexel: V2(), uMaxCoC: 1 });
+        R.godrayPass = AF.T3.pass('godray', SP.GODRAY_FS, {
+          uTex: null, uSunUV: V2(), uDecay: 0.965, uDensity: 0.72,
+          uWeight: 0.11, uExposure: 0.30
+        });
+        R.compPass = AF.T3.pass('comp', SP.COMPOSITE_FS, {
+          uColor: null, uBloom: null, uAO: null, uDOF: null, uRays: null,
+          uDepth: null, uNormalTex: null, uRes: V2(), uTime: 0,
+          uBloomAmt: 1, uAOAmt: 1, uExposure: 1, uVignette: 0, uGrain: 0,
+          uCA: 0, uSat: 1, uContrast: 1, uLift: V3(), uGain: V3(),
+          uRaysAmt: 0, uDofAmt: 0, uFlash: 0, uFlashCol: V3(),
+          uOutline: 0.85, uPaper: 0.02, uNear: 0.35, uFar: 420
+        });
+        R.fxaaPass = AF.T3.pass('fxaa', SP.FXAA_FS,
+          { uTex: null, uTexel: V2(), uSharp: 0 });
       }
     }
   };
@@ -765,13 +800,49 @@
   // ==================================================================
   //  POST CHAIN
   // ==================================================================
+  //  Scratch uniform objects. three keeps a reference to whatever is put
+  //  in uniform.value, so handing it a fresh Vector2 per pass per frame
+  //  would allocate a few hundred objects a second for no reason.
+  var _v2 = [], _v2n = 0, _v3 = [], _v3n = 0, _m4 = [], _m4n = 0;
+  function vec2Of(x, y) {
+    var v = _v2[_v2n] || (_v2[_v2n] = new THREE.Vector2());
+    _v2n = (_v2n + 1) % 16; return v.set(x, y);
+  }
+  function vec3Of(a) {
+    var v = _v3[_v3n] || (_v3[_v3n] = new THREE.Vector3());
+    _v3n = (_v3n + 1) % 8; return v.set(a[0], a[1], a[2]);
+  }
+  function mat4Of(m) {
+    var v = _m4[_m4n] || (_m4[_m4n] = new THREE.Matrix4());
+    _m4n = (_m4n + 1) % 8; return v.fromArray(m);
+  }
+
   R.post = function (env, cam, fx) {
     var P, i;
     GLX.depth(false, false);
     GLX.blend(false);
     GLX.cull(false);
 
-    if (fx.ao > 0.001) {
+    if (fx.ao > 0.001 && R.ssaoPass) {
+      //  MIGRATION STAGE 4. SSAO and its separable bilateral blur. The
+      //  ping-pong still ends in aoFB, never aoFB2 - the composite samples
+      //  aoFB and swapping the last write silently halves the effect.
+      var T3 = AF.T3, aoT = new THREE.Vector2(1 / R.aoFB.width, 1 / R.aoFB.height);
+      R.ssaoPass.render(R.aoFB, {
+        uDepth: T3.depth(R.sceneFB), uNormal: T3.tex(R.sceneFB, 1),
+        uInvProj: mat4Of(cam.invProj), uProj: mat4Of(cam.proj), uView: mat4Of(cam.view),
+        uRes: vec2Of(R.aoFB.width, R.aoFB.height),
+        uRadius: fx.aoRadius, uStrength: fx.aoStrength, uTime: env.time
+      });
+      R.blurPass.render(R.aoFB2, {
+        uTex: T3.tex(R.aoFB), uDepth: T3.depth(R.sceneFB),
+        uDir: vec2Of(1, 0), uTexel: aoT
+      });
+      R.blurPass.render(R.aoFB, {
+        uTex: T3.tex(R.aoFB2), uDepth: T3.depth(R.sceneFB),
+        uDir: vec2Of(0, 1), uTexel: aoT
+      });
+    } else if (fx.ao > 0.001) {
       R.aoFB.bind(false);
       P = R.P.ssao; P.use();
       P.tex('uDepth', R.sceneFB.depthTex);
@@ -873,7 +944,18 @@
     }
 
     // dof
-    if (fx.dof > 0.001) {
+    if (fx.dof > 0.001 && R.cocPass) {
+      R.cocPass.render(R.dofA, {
+        uColor: AF.T3.tex(R.sceneFB, 0), uDepth: AF.T3.depth(R.sceneFB),
+        uNear: cam.near, uFar: cam.far, uFocus: fx.focus,
+        uAperture: fx.aperture, uMaxCoC: fx.maxCoC
+      });
+      R.dofPass.render(R.dofB, {
+        uTex: AF.T3.tex(R.dofA),
+        uTexel: vec2Of(1 / R.dofA.width, 1 / R.dofA.height),
+        uMaxCoC: fx.maxCoC
+      });
+    } else if (fx.dof > 0.001) {
       R.dofA.bind(false);
       P = R.P.coc; P.use();
       P.tex('uColor', R.sceneFB.color[0]);
@@ -890,11 +972,25 @@
       P.f('uMaxCoC', fx.maxCoC);
       GLX.fullscreen();
     } else {
+      //  DISABLED MEANS ALPHA 0, not black. The composite reads uDOF.a as
+      //  the blend weight, so clearing this to opaque black would blur the
+      //  whole frame to nothing on the Low preset.
       R.dofB.bind(true, 0, 0, 0, 0);
     }
 
     // god rays
-    if (fx.rays > 0.001 && fx.sunOnScreen) {
+    if (fx.rays > 0.001 && fx.sunOnScreen && R.godrayPass) {
+      //  the shafts are grown from bloom level 1, so this depends on the
+      //  down chain having already run
+      R.copyPass2.render(R.raysFB, {
+        uTex: R.T3bloom ? R.T3bloom.down[1].texture : AF.T3.tex(R.bloom[1])
+      });
+      R.godrayPass.render(R.raysFB2, {
+        uTex: AF.T3.tex(R.raysFB),
+        uSunUV: vec2Of(fx.sunUV[0], fx.sunUV[1]),
+        uDecay: 0.965, uDensity: 0.72, uWeight: 0.11, uExposure: 0.30
+      });
+    } else if (fx.rays > 0.001 && fx.sunOnScreen) {
       R.raysFB.bind(false);
       P = R.P.copy; P.use();
       P.tex('uTex', (R.T3bloom ? AF.T3.raw(R.T3bloom.down[1]) : R.bloom[1].color[0]));
@@ -913,6 +1009,33 @@
     }
 
     // composite
+    if (R.compPass) {
+      R.compPass.render(R.compFB, {
+        uColor: AF.T3.tex(R.sceneFB, 0),
+        uBloom: R.T3bloom ? R.T3bloom.up[0].texture : AF.T3.tex(R.bloomUp[0]),
+        uAO: AF.T3.tex(R.aoFB), uDOF: AF.T3.tex(R.dofB), uRays: AF.T3.tex(R.raysFB2),
+        uDepth: AF.T3.depth(R.sceneFB), uNormalTex: AF.T3.tex(R.sceneFB, 1),
+        uRes: vec2Of(R.width, R.height), uTime: env.time,
+        uBloomAmt: fx.bloom, uAOAmt: fx.ao, uExposure: fx.exposure,
+        uVignette: fx.vignette, uGrain: fx.grain, uCA: fx.ca,
+        uSat: fx.saturation, uContrast: fx.contrast,
+        uLift: vec3Of(fx.lift), uGain: vec3Of(fx.gain),
+        uRaysAmt: fx.rays, uDofAmt: fx.dof, uFlash: fx.flash,
+        uFlashCol: vec3Of(fx.flashCol),
+        uOutline: fx.outline === undefined ? 0.85 : fx.outline,
+        uPaper: fx.paper === undefined ? 0.02 : fx.paper,
+        uNear: cam.near, uFar: cam.far
+      });
+      //  FXAA is the only pass that writes the default framebuffer, and the
+      //  frame has to END there: the harness reads the canvas back in the
+      //  same JS task (B31).
+      R.fxaaPass.render(null, {
+        uTex: AF.T3.tex(R.compFB),
+        uTexel: vec2Of(1 / R.width, 1 / R.height),
+        uSharp: fx.sharpen
+      });
+      return;
+    }
     R.compFB.bind(false);
     P = R.P.comp; P.use();
     P.tex('uColor', R.sceneFB.color[0]);

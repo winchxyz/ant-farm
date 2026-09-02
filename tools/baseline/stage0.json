@@ -126,5 +126,27 @@
     "cause": "The first measurement after any target rebuild is unsettled - R.resize also rebuilds the water module's targets, and its ping-pong buffers need a few frames. Not the never-cleared shadow map: clearing it by hand changed nothing.",
     "recipe": "Discard the first reading after a resize or a scene change and let ~10 frames pass. With that, the water halo metric is reproducible to +/-20 px.",
     "briefGap": "Section 5 asks for a pixel A/B against the previous stage's stills, but Stage 3 by definition reallocates ~26 targets, so that comparison can only ever read its own settling noise. Use the functional gates instead."
+  },
+  "stage4": {
+    "what": "The entire post chain draws through three: SSAO + bilateral blur, the bloom pyramid, CoC/DoF, god rays, the composite and the FXAA blit to the default framebuffer.",
+    "gates": {
+      "farPlaneSentinel": "0 pixels near 0.5, 226405 at the far plane, depth range 0.9805-0.9992. B23 intact.",
+      "inkOutline": "3276 px darkened, 0.34% of the frame - present on edges, absent from flat ground and sky.",
+      "lowPreset": "ao/dof/rays/bloom all off: 99.9% of the frame lit, no black screen.",
+      "aoPingPongEndsInAoFB": true,
+      "fxaaEndsOnDefaultFramebuffer": true
+    },
+    "strictRun": {
+      "frames": 4000,
+      "lastError": null,
+      "errorLog": 0,
+      "msPerFrame": 1.72
+    }
+  },
+  "resyncBeforeNotJustAfter": {
+    "finding": "L14 says resetState after every raw GL block. In a frame that alternates raw and three passes - every frame for the whole migration - it is also needed BEFORE every three pass.",
+    "symptom": "Does not look like a state bug. A raw fbo.bind() sets gl.viewport behind three's back; three's cache still holds the old value, decides its own viewport call is redundant on the next setRenderTarget, and the pass draws into a stale rectangle.",
+    "measured": "With god rays skipped, raysFB2.bind() left the viewport at 300x200 and the composite wrote a 300x200 corner of a 1200x800 target - 93.7% of the frame pure black - while sceneFB itself was perfectly full at 1200x800. Localised by reading the bounding box of lit pixels in each target in turn.",
+    "fix": "T3 Pass.render resyncs on entry as well as exit."
   }
 }

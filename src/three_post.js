@@ -172,7 +172,22 @@
     if (values) for (var k in values) {
       if (this.uniforms[k]) this.uniforms[k].value = values[k];
     }
+    if (rt && rt.rt) rt = rt.rt;          // a T3FBO adapter
     var three = R.three;
+    //  RESYNC ON THE WAY IN AS WELL AS OUT.
+    //
+    //  L14 says to resetState after every raw GL block. In a frame that
+    //  alternates between the two - which is every frame for the whole
+    //  migration - that means before every three pass, not only after one.
+    //
+    //  The failure it prevents does not look like a state bug. A raw
+    //  fbo.bind() sets gl.viewport behind three's back, three's cache still
+    //  holds the old value, so on the next setRenderTarget it decides the
+    //  viewport call is redundant and skips it - and the pass draws into a
+    //  stale rectangle. Measured: with god rays skipped, raysFB2.bind() left
+    //  the viewport at 300x200 and the composite then wrote a 300x200 corner
+    //  of a 1200x800 target while sceneFB itself was perfectly full.
+    if (R.threeResync) R.threeResync();
     scene.clear();
     scene.add(this.mesh);
     three.setRenderTarget(rt || null);
@@ -186,6 +201,24 @@
 
   T3.pass = function (name, fs, uniforms) { return new Pass(name, fs, uniforms); };
   T3.Pass = Pass;
+
+  //  Whatever a pass needs to SAMPLE, as something three can bind.
+  //  A target this bridge owns hands over its own three Texture; anything
+  //  still on raw GL is wrapped as an ExternalTexture. Callers do not have
+  //  to know which they have, which is what lets the post chain be ported
+  //  one pass at a time while its neighbours stay raw.
+  T3.tex = function (f, i) {
+    i = i || 0;
+    if (!f) return null;
+    if (f.rt) { var ts = f.rt.textures || [f.rt.texture]; return ts[i] || ts[0]; }
+    if (f.color) return T3.extern(f.color[i]);
+    return T3.extern(f);
+  };
+  T3.depth = function (f) {
+    if (!f) return null;
+    if (f.rt && f.rt.depthTexture) return f.rt.depthTexture;
+    return T3.extern(f.depthTex || f);
+  };
 
   // ------------------------------------------------------------------
   //  a three render target wearing GLX.FBO's clothes
