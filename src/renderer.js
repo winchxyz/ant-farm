@@ -102,6 +102,43 @@
     R.quality = 1.0;
     R.dpr = 1;
 
+    //  THREE.JS, ADOPTED BUT NOT YET DRAWING (migration stage 1).
+    //
+    //  It takes over the EXISTING canvas and the EXISTING context rather than
+    //  making its own - a second context would give a 0x0 bounding rect, and
+    //  every pick in player.js/input.js derives NDC from getBoundingClientRect.
+    //  Nothing renders through it yet; this stage exists only to prove the
+    //  state cache can be kept coherent alongside the hand-written passes.
+    //
+    //  The three defaults that would silently rewrite this frame are turned
+    //  off here, once: autoClear would wipe the scene target that thirty
+    //  later passes depend on, sortObjects would reorder a hand-fixed
+    //  sequence whose blend modes do not commute, and shadowMap would
+    //  substitute MeshDepthMaterial behind the manual shadow pass.
+    if (window.THREE) {
+      try {
+        R.three = new THREE.WebGLRenderer({
+          canvas: canvas, context: gl,
+          alpha: false, antialias: false, stencil: false, depth: true,
+          powerPreference: 'high-performance',
+          preserveDrawingBuffer: /[?&]shot/.test(location.search)
+        });
+        R.three.autoClear = false;
+        R.three.autoClearColor = false;
+        R.three.autoClearDepth = false;
+        R.three.autoClearStencil = false;
+        R.three.sortObjects = false;
+        R.three.shadowMap.enabled = false;
+        //  css/ui.css owns the canvas CSS box; setSize would write inline
+        //  style and break both the cursor rules and the pick maths.
+        R.three.setPixelRatio(1);
+        R.threeVersion = THREE.REVISION;
+      } catch (e) {
+        R.three = null;
+        console.error('three.js adoption failed, staying on raw GL: ' + e.message);
+      }
+    }
+
     var P = {};
     P.sky = GLX.program(GLX.FS_VS, S.SKY_FS, 'sky');
     P.soil = GLX.program(S.SOIL_VS, S.SOIL_FS, 'soil');
@@ -278,6 +315,11 @@
       GLX.fullscreen();
     }
     gl.bindFramebuffer(gl.FRAMEBUFFER, null);
+    //  The bake runs during UPDATE, outside the frame, and hijacks the
+    //  viewport without restoring it (it survives because the next FBO bind
+    //  resets it). Resync three here too, or its cache carries the bake's
+    //  framebuffer and viewport into the first pass that goes through it.
+    if (R.three) R.three.resetState();
     R.stats.bakeMs = performance.now() - t0;
   };
 
@@ -799,6 +841,12 @@
   };
 
   R.frameStart = function () {
+    //  three caches blend factors, depth mask, cull face and drawBuffers and
+    //  skips calls it believes are redundant. Every raw GL call this renderer
+    //  makes leaves that cache lying, after which three would omit exactly
+    //  the call needed to put the state back. Resynchronise once a frame for
+    //  the whole duration of the migration.
+    if (R.three) R.three.resetState();
     R.stats.draws = 0; R.stats.tris = 0; R.stats.instances = 0;
     for (var k in R.B) R.B[k].begin();
   };

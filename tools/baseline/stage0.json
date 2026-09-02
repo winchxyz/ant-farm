@@ -1,0 +1,97 @@
+{
+  "note": "Stage 0 golden numbers for THREEJS-MIGRATION.md section 5.0. Captured on the pre-migration build at commit 5ef4be8, cache key v=95.",
+  "gpu": "ANGLE (NVIDIA, NVIDIA GeForce RTX 4070 Laptop GPU, D3D11)",
+  "validators": {
+    "check.js": "33668 triangles across 27 meshes \u00b7 failures: 0",
+    "glsl_lint.js": "shaders with problems: 0",
+    "shaderPrograms": 24
+  },
+  "strictRun": {
+    "frames": 4000,
+    "lastError": null,
+    "errorLog": 0,
+    "harnessErrors": 0,
+    "msPerFrame": 1.43
+  },
+  "pinnedCamera": {
+    "focus": [
+      "center[0]",
+      "center[1]+2",
+      "center[2]"
+    ],
+    "dist": 34,
+    "yaw": 0.42,
+    "pitch": 0.3
+  },
+  "stats": {
+    "draws": 38,
+    "instances": 666,
+    "tris": 92556,
+    "w": 1200,
+    "h": 800,
+    "fps": 60
+  },
+  "viewport": {
+    "innerW": 1200,
+    "innerH": 800,
+    "dpr": 1,
+    "dprCap": 1.4,
+    "perfScale": 1
+  },
+  "stills": [
+    "base_a_tank_outside.png",
+    "base_b_inside_soil.png  (eye forced inside the box, in chamber air: tank must still render - B10)",
+    "base_c_pool.png",
+    "base_d_nursery.png  (brood 6, stages mixed)",
+    "base_e_digghost.png"
+  ],
+  "waterHalo": {
+    "source": "BUGS.md fixed 13, frozen-particle A/B, 700 particles",
+    "paleOutsidePx": 1838,
+    "paleOutsideEnergy": 5.95,
+    "preFixReference": {
+      "paleOutsidePx": 170630,
+      "energy": 627.8
+    }
+  },
+  "propRadii": {
+    "bigrock": 0.898,
+    "pebble": 0.895,
+    "mushroomRFix": [
+      0.032,
+      0.056,
+      0.081
+    ]
+  },
+  "determinism": {
+    "finding": "The renderer is NOT frame-deterministic with depth of field enabled. Three consecutive G.render() calls on a frozen scene differ from each other by 2700-5300 pixels, max channel-sum 10-12, out of 960000.",
+    "isolatedBy": "Turning each post effect off in turn. fx.ao/bloom/rays off still differ; fx.dof=0 alone gives 0 differing pixels.",
+    "cause": "the depth-of-field pass",
+    "consequence": "THREEJS-MIGRATION.md section 5 asks for pixel A/B against previous-stage stills, and Stage 1 for bit-identical. That is unachievable as written unless DOF is off.",
+    "recipe": "Set Game.fxSettings.dof = 0 before every comparison capture and restore afterwards. With DOF off the frame is bit-exact and A/B is meaningful.",
+    "referenceStills": [
+      "ref_a_tank_outside.png",
+      "ref_b_inside_soil.png",
+      "ref_c_pool.png",
+      "ref_d_nursery.png"
+    ],
+    "note": "This is also a live bug in its own right: a paused game shimmers. Not fixed here - out of scope for the migration - but worth an entry in BUGS.md."
+  },
+  "stage1": {
+    "what": "three.js r169 adopted on the existing canvas and context; renders nothing.",
+    "verification": "In-page A/B in one JS task with an identical frozen scene, dof off: with R.three vs R.three=null -> 0 differing pixels. Bit-identical.",
+    "strictRun": {
+      "frames": 4000,
+      "lastError": null,
+      "errorLog": 0
+    },
+    "stats": {
+      "draws": 38,
+      "instances": 666,
+      "tris": 92556,
+      "w": 1200,
+      "h": 800
+    },
+    "threeRevision": "169"
+  }
+}
