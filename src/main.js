@@ -260,7 +260,21 @@
     requestAnimationFrame(loop);
     var dt = last ? (now - last) / 1000 : 0.016;
     last = now;
+    //  Clamped at BOTH ends. The upper clamp has always been here; the lower
+    //  one was not, and nothing in the frame body survives a negative dt:
+    //  Game.time and Game.sim.time run backwards, damp() and every timer go
+    //  the wrong way, and an AudioParam ramp scheduled in the past throws
+    //  outright - with a stack pointing at whatever happened to be making a
+    //  noise, which is never where the fault is.
+    //
+    //  It is reachable from a stalled or rewound rAF clock, and it is
+    //  reachable on purpose: the harness recipe in BUGS.md sets
+    //  window.__T = 1e6 and steps by hand, so the first REAL frame after that
+    //  hands this line a dt near -970 seconds. Manufactured crashes were
+    //  chased twice before anyone noticed the sign. Negative simTime in an
+    //  error snapshot is the tell.
     if (dt > 0.25) dt = 0.25;
+    if (!(dt > 0)) dt = 0;
 
     // fps + adaptive resolution: hold 60 by trading pixels, never features
     acc += dt; frames++;

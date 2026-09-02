@@ -29,6 +29,24 @@
   'use strict';
 
   var WR = {};
+  WR.tint = 0.30;                 // shallow-water tint strength; see uTint
+  //  THICKNESS PER SPLAT - the number that decides whether water looks like
+  //  water. It was 0.055, and with the thickness field now smoothed (see the
+  //  thickness blur below) that left a poured puddle at th.r far under the
+  //  coverage ramp: colourless, a faint sheen on the sand rather than a pool.
+  //  Swept against a real puddle, measuring the blue-minus-red shift the
+  //  water introduces and how much it darkens what is behind it:
+  //
+  //      uScale   blue shift   darkening
+  //      0.055      0.023        0.051     <- invisible, the reported bug
+  //      0.10       0.230        0.132
+  //      0.13       ~0.30        ~0.17     <- reads as water
+  //      0.16       0.367        0.217     <- poster paint
+  //
+  //  Safe to raise because the thickness blur is masked by the depth buffer,
+  //  so a bigger number cannot push the film outward past its own silhouette.
+  WR.thickScale = 0.13;           // thickness written per splat; see uScale
+  WR.thickK = 2.2;                // thickness multiplier for colour only
   var gl = null, GLX = null;
   var P = {}, FB = {};
   var vbo = null, vao = null, data = null, nPart = 0;
@@ -130,12 +148,31 @@
     '#define R 10',
     'uniform sampler2D uSrc;',
     'uniform ivec2 uDir, uSize;',
-    'uniform float uSigR, uSigD;',
+    'uniform float uSigR, uSigD, uKernel, uKernelMax;',
     'out vec4 oCol;',
     'void main(){',
     '  ivec2 tc = ivec2(gl_FragCoord.xy);',
     '  vec4 c = texelFetch(uSrc,tc,0);',
     '  if(c.r <= 0.0){ oCol = c; return; }',
+    '  //  THE KERNEL HAS TO BE THE SIZE OF A PARTICLE ON SCREEN.',
+    '  //',
+    '  //  This filter existed to melt neighbouring spheres into one sheet, and',
+    '  //  it could not, because its reach was ten TEXELS no matter how large a',
+    '  //  sphere was. A particle is 0.37 world units and gl_PointSize gives it',
+    '  //  uPointScale*0.37/depth pixels: about 9 across the tank at depth 55,',
+    '  //  but 50 across at depth 10. Zoomed out the kernel covered whole',
+    '  //  particles and the pool read as liquid; zoomed in it smoothed a fifth',
+    '  //  of one, every sphere kept its own bump, and a shallow film came out',
+    '  //  as a bag of beads. That is the "lots of small blobs" report, and it',
+    '  //  was never visible before only because thin water was not drawn at',
+    '  //  all - the coverage ramp discarded it.',
+    '  //',
+    '  //  So the taps stride. `uKernel` is the projected radius of a particle',
+    '  //  at THIS pixel depth, so the ten taps per side always span one',
+    '  //  particle whatever the zoom, and the gaussian weight is unchanged',
+    '  //  because i is now measured in strides rather than in texels.',
+    '  float step = clamp(uKernel / (c.r * float(R)), 1.0, uKernelMax);',
+    '  int st = int(step + 0.5);',
     '  float sum = c.r, wsum = 1.0;',
     '  //  INTERIORNESS, carried in alpha, for free.',
     '  //',
@@ -162,7 +199,7 @@
     '  float open = c.a, seen = 1.0;',
     '  for(int i=1;i<=R;i++){',
     '    for(int s=-1;s<=1;s+=2){',
-    '      ivec2 t = tc + uDir*(i*s);',
+    '      ivec2 t = tc + uDir*(i*s*st);',
     '      if(t.x<0||t.y<0||t.x>=uSize.x||t.y>=uSize.y) continue;',
     '      vec4 sm = texelFetch(uSrc,t,0);',
     '      open += sm.a; seen += 1.0;',
@@ -174,6 +211,55 @@
     '    }',
     '  }',
     '  oCol = vec4(sum/wsum, c.g, c.b, open/seen);',
+    '}'
+  ].join('\n');
+
+  // ---------------------------------------------------------------
+  //  2b. thickness blur
+  // ---------------------------------------------------------------
+  //  THE BLOBS CAME FROM HERE, not from the surface.
+  //
+  //  The depth buffer is smoothed and the coverage ramp is smooth, but the
+  //  THICKNESS was never filtered at all - and thickness is what carries the
+  //  colour, through exp(-uAbsorb*thick). Over a pool many particles deep
+  //  that integral is already smooth and nobody noticed. Over a film one
+  //  particle deep it has exactly one bump per particle, so the water came
+  //  out as a pale sheet stamped with a blue dot at every sphere centre.
+  //  That is the "lots of small blobs" report: not the geometry, the tint.
+  //
+  //  Widening the depth kernel does not touch it - measured, the dots
+  //  survive unchanged - so the thickness needs its own pass.
+  //
+  //  It must not spread OUTWARD, or it re-opens the halo that the coverage
+  //  ramp was tightened to close. So the filter is masked by the depth
+  //  buffer: a tap only counts where there is actually a surface, and a
+  //  pixel with no surface is passed through untouched. The silhouette is
+  //  therefore bit-identical before and after, and only the interior moves.
+  var FS_TBLUR = HEAD + [
+    '#define R 10',
+    'uniform sampler2D uSrc, uSurf;',
+    'uniform ivec2 uDir, uSize;',
+    'uniform float uSigR, uKernel, uKernelMax;',
+    'out vec4 oCol;',
+    'void main(){',
+    '  ivec2 tc = ivec2(gl_FragCoord.xy);',
+    '  vec4 c = texelFetch(uSrc,tc,0);',
+    '  float dc = texelFetch(uSurf,tc,0).r;',
+    '  if(dc <= 0.0){ oCol = c; return; }',
+    '  //  same particle-sized stride as the depth blur, for the same reason',
+    '  float stf = clamp(uKernel / (dc * float(R)), 1.0, uKernelMax);',
+    '  int st = int(stf + 0.5);',
+    '  vec2 sum = c.rg; float wsum = 1.0;',
+    '  for(int i=1;i<=R;i++){',
+    '    for(int s=-1;s<=1;s+=2){',
+    '      ivec2 t = tc + uDir*(i*s*st);',
+    '      if(t.x<0||t.y<0||t.x>=uSize.x||t.y>=uSize.y) continue;',
+    '      if(texelFetch(uSurf,t,0).r <= 0.0) continue;   // outside the water',
+    '      float w = exp(-float(i*i)*uSigR);',
+    '      sum += texelFetch(uSrc,t,0).rg*w; wsum += w;',
+    '    }',
+    '  }',
+    '  oCol = vec4(sum/wsum, c.b, c.a);',
     '}'
   ].join('\n');
 
@@ -219,7 +305,7 @@
     'uniform mat4 uInvView, uProj;',
     'uniform vec3 uCamPos, uSunDir, uSunCol, uSkyCol, uGndCol, uAbsorb, uScatter;',
     'uniform vec2 uInvRes, uTan;',
-    'uniform float uTime, uThickK, uRefr, uToon;',
+    'uniform float uTime, uThickK, uRefr, uToon, uTint;',
     'layout(location=0) out vec4 oColor;',
     'layout(location=1) out vec4 oNormal;',
     'float hash13(vec3 p){ p=fract(p*0.1031); p+=dot(p,p.zyx+31.32); return fract((p.x+p.y)*p.z); }',
@@ -249,7 +335,7 @@
     '  //  This is the test the ledger asked for and never got: a real',
     '  //  silhouette test, not another constant on the thickness.',
     '  float solid = texture(uSurf,uv).a;',
-    '  float edge = smoothstep(0.60,0.94,solid);',
+    '  float edge = smoothstep(0.35,0.85,solid);',
     '  //  Coverage decides whether the eye sees anything here, so it also',
     '  //  decides whether this fragment may write DEPTH. It used to write',
     '  //  unconditionally the moment th.r cleared 0.14, which stamps a water',
@@ -271,12 +357,35 @@
     '  float thick = th.r*uThickK;',
     '  mat3 R3 = mat3(uInvView);',
     '  vec3 N = normalize(R3*nEye);',
+    '  //  A NORMAL WE DO NOT BELIEVE IS REPLACED, NOT PUNISHED.',
+    '  //',
+    '  //  Near the outline the smoothed depth is a one-sided ramp falling off',
+    '  //  the edge of the data, so the rebuilt normal is edge-on: nv goes to',
+    '  //  zero, Fresnel goes to one, and the shader paints a mirror ring. The',
+    '  //  first attempt at this gated the reflection off wherever the normal',
+    '  //  was suspect - which removes the ring, and also removes the sheen',
+    '  //  from every pool too small to have a trusted middle. Measured on a',
+    '  //  shallow spread: the water stopped being drawn at all.',
+    '  //',
+    '  //  A pool lies on the ground, so the honest fallback is not "no',
+    '  //  reflection" but "flat". Blending toward world up as confidence',
+    '  //  falls gives the rim a normal it could plausibly have, Fresnel is',
+    '  //  computed from something real everywhere, and the ring never forms',
+    '  //  because nv never collapses.',
+    '  N = normalize(mix(vec3(0.0,1.0,0.0), N, edge));',
     '  vec3 Pw = (uInvView*vec4(Pe,1.0)).xyz;',
     '  vec3 V = normalize(uCamPos-Pw);',
     '  //  live ripples, only where there is a real body of water',
     '  vec3 dn = vec3(n3(Pw*5.5+vec3(0.0,uTime*0.55,0.0)),',
     '                 n3(Pw*7.1+vec3(23.1,-uTime*0.42,7.3)),',
     '                 n3(Pw*6.3+vec3(51.7,4.2,uTime*0.37)))-0.5;',
+    '  //  Keep the geometric normal before the ripple goes on. Attachment 1',
+    '  //  is read by exactly two passes - SSAO and the ink outline - and',
+    '  //  neither wants shading detail. The ink pass runs a Sobel over it and',
+    '  //  draws a black mark wherever it finds a crease, so handing it the',
+    '  //  rippled normal stippled every pool with soot. Measured by turning',
+    '  //  the ink pass off: the speckle is entirely it.',
+    '  vec3 Ng = N;',
     '  N = normalize(N + dn*0.13*smoothstep(0.05,0.55,thick));',
     '  float nv = max(dot(N,V),1.0e-4);',
     '  float F = 0.02 + 0.98*pow(1.0-nv,5.0);',
@@ -293,8 +402,7 @@
     '  //  was invented by the depth blur (edge). Thickness alone was never',
     '  //  enough - at the rim th.r is 0.3 to 0.6, so body is 0.5 to 1.0 and',
     '  //  Fresnel still reached 0.5 to 1.0 on a normal that is an artefact.',
-    '  float trust = body*edge;',
-    '  F = mix(0.02,F,trust);',
+    '  F = mix(0.02,F,body);',
     '  //  refraction, with a touch of dispersion so the rim splits colour',
     '  float bend = uRefr*min(thick,1.4)*0.225/max(depth*0.45,0.25);',
     '  vec2 off = nEye.xy*bend;',
@@ -307,9 +415,32 @@
     '  //  turns into warm milk.',
     '  vec3 atten = exp(-uAbsorb*thick);',
     '  float nl = max(dot(N,uSunDir),0.0);',
-    '  float sct = 1.0-exp(-thick*0.55);',
+    '  //  WHY THIN WATER WAS COLOURLESS.',
+    '  //',
+    '  //  Both colour terms are driven by THICKNESS. Absorption is',
+    '  //  exp(-uAbsorb*thick) and scattering is 1-exp(-thick*0.55), so a film',
+    '  //  one particle deep gets atten ~ 1 and sct ~ 0: the sand behind is',
+    '  //  handed through untouched and the water is invisible. That is',
+    '  //  honest optics - a few millimetres of water over pale sand really is',
+    '  //  clear - and it is wrong for this game, where a poured puddle has to',
+    '  //  read as water at a glance against a storybook tank.',
+    '  //',
+    '  //  The doctrine at the top of this file still holds: absorption',
+    '  //  carries the colour and the sense of DEPTH, scattering only fills',
+    '  //  the shallows. This gives the shallows something to fill with. The',
+    '  //  floor rides on COVERAGE, not on thickness, so it appears exactly',
+    '  //  where the surface is and nowhere else - cov is the silhouette-tight',
+    '  //  ramp, so a tint keyed to it cannot bleed onto the sand the way a',
+    '  //  thickness-keyed one would.',
+    '  float sct = max(1.0-exp(-thick*0.55), cov*uTint*1.8);',
     '  vec3 trans = refr*atten;',
     '  trans += uScatter*sct*0.20*(0.34+0.66*nl)*mix(1.0,0.45,clamp(thick*0.5,0.0,1.0));',
+    '  //  and a shallow film still TINTS what it lets through, or a puddle on',
+    '  //  bright sand comes out as a grey sheen rather than as water. Scaled',
+    '  //  by uScatter, so it is the same blue the deep water absorbs toward,',
+    '  //  and multiplied rather than added so it darkens as it colours - wet',
+    '  //  sand under water is not brighter than dry sand beside it.',
+    '  trans = mix(trans, trans*uScatter*2.2, cov*uTint);',
     '  vec3 Rv = reflect(-V,N);',
     '  vec3 refl = mix(uGndCol,uSkyCol,Rv.y*0.5+0.5);',
     '  vec3 hv = normalize(uSunDir+V);',
@@ -327,7 +458,7 @@
     '  //  An exponent of 190 is the most normal-sensitive quantity here, so it',
     '  //  is the last thing that may be computed from a normal we have just',
     '  //  measured as untrustworthy.',
-    '  spec *= trust;',
+    '  spec *= body;',
     '  refl += uSunCol*spec*3.4;',
     '  vec3 col = mix(trans,refl,F);',
     '  //  aeration only reads as white water where there is a body to aerate',
@@ -366,7 +497,20 @@
     '  //  five degrees into the surface, and returns near-total occlusion,',
     '  //  which its half-res blur then smears about thirty-five pixels past',
     '  //  the pool. With alpha = cov the write is the lerp it was meant to be.',
-    '  oNormal = vec4((N*0.5+0.5)*cov, cov);',
+    '  //  FLATTENED HARD, on purpose. Attachment 1 is read by exactly two',
+    '  //  passes - SSAO and the ink outline - and neither is shading the',
+    '  //  water, they are asking what shape is here. A pool is a horizontal',
+    '  //  sheet; the ripple in the reconstruction is a filter artefact, not',
+    '  //  geometry. The ink pass runs a Sobel over this buffer and draws a',
+    '  //  black mark wherever two neighbours disagree, so handing it the raw',
+    '  //  reconstructed normal stippled every pool with soot. Confirmed by',
+    '  //  zeroing that term: the speckle is entirely it, and the depth term',
+    '  //  alone still draws the outline round the pool, which is wanted.',
+    '  //',
+    '  //  Flattening here and not in the ink pass keeps creases on ants,',
+    '  //  props and dug soil, which is the whole point of that pass.',
+    '  vec3 Ngb = normalize(mix(vec3(0.0,1.0,0.0), Ng, 0.25));',
+    '  oNormal = vec4((Ngb*0.5+0.5)*cov, cov);',
     '}'
   ].join('\n');
 
@@ -378,6 +522,7 @@
     P.part = GLX.program(VS_PART, FS_DEPTH, 'wdepth');
     P.thick = GLX.program(VS_PART, FS_THICK, 'wthick');
     P.blur = GLX.program(VS_FULL, FS_BLUR, 'wblur');
+    P.tblur = GLX.program(VS_FULL, FS_TBLUR, 'wtblur');
     P.nrm = GLX.program(VS_FULL, FS_NORMAL, 'wnrm');
     P.comp = GLX.program(VS_FULL, FS_COMP, 'wcomp');
 
@@ -397,7 +542,7 @@
 
   WR.resize = function (w, h) {
     var F16 = { internalFormat: gl.RGBA16F, format: gl.RGBA, type: gl.HALF_FLOAT };
-    if (FB.depth) { FB.depth.destroy(); FB.blur.destroy(); FB.nrm.destroy(); FB.thick.destroy(); }
+    if (FB.depth) { FB.depth.destroy(); FB.blur.destroy(); FB.nrm.destroy(); FB.thick.destroy(); FB.thick2.destroy(); }
     //  Half resolution. Four bilateral passes with a 29-tap kernel at full
     //  res is ~170M texture fetches a frame and simply will not hold 60fps;
     //  at half res it is a quarter of that, and because the filter's job is
@@ -412,6 +557,7 @@
     FB.blur = new GLX.FBO({ width: fw, height: fh, color: [F16] });
     FB.nrm = new GLX.FBO({ width: fw, height: fh, color: [F16] });
     FB.thick = new GLX.FBO({ width: fw, height: fh, color: [F16] });
+    FB.thick2 = new GLX.FBO({ width: fw, height: fh, color: [F16] });
     FB.w = fw; FB.h = fh; FB.srcW = w; FB.srcH = h;
   };
 
@@ -493,7 +639,7 @@
       .m4('uView', cam.view).m4('uProj', cam.proj)
       .tex('uSurf', FB.depth.color[0])
       .v2('uInvRes', 1 / w, 1 / h)
-      .f('uPointScale', pointScale).f('uScale', 0.055);
+      .f('uPointScale', pointScale).f('uScale', WR.thickScale);
     gl.drawArrays(gl.POINTS, 0, nPart);
     gl.bindVertexArray(null);
 
@@ -507,21 +653,53 @@
     GLX.depth(false, false); GLX.blend(false);
     var sigR = 1.0 / (2.0 * 6.0 * 6.0);
     var sigD = 1.0 / (2.0 * 0.85 * 0.85);
+    //  uKernel is pointScale * particle radius: divided by a pixel's depth in
+    //  the shader it gives that particle's projected radius in texels, which
+    //  is how far the ten taps have to reach to span one sphere. Without it
+    //  the reach is ten texels at every zoom - fine across the tank, a fifth
+    //  of a particle up close, which is what left every sphere its own bump.
+    //  Capped, because a particle right against the glass projects to
+    //  hundreds of texels and striding that far turns the filter into noise.
+    var kernel = pointScale * ((AF.PS && AF.PS.RAD_WATER) || 0.37);
     for (var pass = 0; pass < 1; pass++) {
       FB.blur.bind(false);
       P.blur.use().tex('uSrc', FB.depth.color[0]);
       gl.uniform2i(P.blur.u['uDir'], 1, 0);
       gl.uniform2i(P.blur.u['uSize'], w, h);
-      P.blur.f('uSigR', sigR).f('uSigD', sigD);
+      P.blur.f('uSigR', sigR).f('uSigD', sigD).f('uKernel', kernel).f('uKernelMax', 6.0);
       GLX.fullscreen();
 
       FB.depth.bind(false);
       P.blur.use().tex('uSrc', FB.blur.color[0]);
       gl.uniform2i(P.blur.u['uDir'], 0, 1);
       gl.uniform2i(P.blur.u['uSize'], w, h);
-      P.blur.f('uSigR', sigR).f('uSigD', sigD);
+      P.blur.f('uSigR', sigR).f('uSigD', sigD).f('uKernel', kernel).f('uKernelMax', 6.0);
       GLX.fullscreen();
     }
+
+    // ---- thickness blur ----
+    //  Runs AFTER the depth blur, because it masks itself against the depth
+    //  buffer and wants the smoothed silhouette rather than the raw splats.
+    //  Two passes, ping-ponging thick -> thick2 -> thick.
+    FB.thick2.bind(false);
+    P.tblur.use().tex('uSrc', FB.thick.color[0]).tex('uSurf', FB.depth.color[0]);
+    gl.uniform2i(P.tblur.u['uDir'], 1, 0);
+    gl.uniform2i(P.tblur.u['uSize'], w, h);
+    //  HALF a particle radius, not a whole one. The depth blur wants to span
+    //  a sphere so its bumps disappear; the thickness only has to span the
+    //  GAP between spheres. Reaching a full radius averages the film over an
+    //  area far larger than its own variation and pulls the peak down to the
+    //  area mean - measured, the dots vanished and so did the colour, leaving
+    //  a sandy haze. Half a radius kills the dots and keeps the body.
+    P.tblur.f('uSigR', sigR).f('uKernel', kernel * 0.5).f('uKernelMax', 3.0);
+    GLX.fullscreen();
+
+    FB.thick.bind(false);
+    P.tblur.use().tex('uSrc', FB.thick2.color[0]).tex('uSurf', FB.depth.color[0]);
+    gl.uniform2i(P.tblur.u['uDir'], 0, 1);
+    gl.uniform2i(P.tblur.u['uSize'], w, h);
+    P.tblur.f('uSigR', sigR).f('uKernel', kernel * 0.5).f('uKernelMax', 3.0);
+    GLX.fullscreen();
 
     // ---- normals ----
     FB.nrm.bind(false);
@@ -559,7 +737,22 @@
     Pc.v2('uInvRes', 1 / R.width, 1 / R.height);
     Pc.v2('uTan', tanX, tanY);
     Pc.f('uTime', env.time);
-    Pc.f('uThickK', 1.0);
+    //  Absorption only - the coverage ramp reads th.r raw, so this tints the
+    //  water without touching its silhouette.
+    //
+    //  It was 1.0, tuned when the thickness field was still peaky: the dots
+    //  at the sphere centres carried the colour and the gaps between them
+    //  carried none. Smoothing the thickness replaced those peaks with the
+    //  area mean, which is the honest number and is a good deal lower, so a
+    //  one-particle film came out colourless - a pale sheen that read as wet
+    //  sand rather than as water. Scaling the absorption input back up puts
+    //  the tint where the peaks used to put it, but spread evenly over the
+    //  film instead of stamped on it once per particle.
+    Pc.f('uThickK', WR.thickK);
+    //  How hard a THIN film is tinted. Absorption alone leaves one-particle
+    //  water colourless, which is honest and unreadable; this is the
+    //  storybook allowance. Live-tunable as AF.WR.tint while dialling it in.
+    Pc.f('uTint', WR.tint);
     Pc.f('uRefr', 1.0);
     Pc.f('uToon', env.toon === undefined ? 1 : env.toon);
     GLX.fullscreen();

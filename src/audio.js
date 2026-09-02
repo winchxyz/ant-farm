@@ -89,6 +89,16 @@
   };
 
   Audio.prototype._env = function (node, t0, a, d, peak, sustain, rel) {
+    //  WebAudio rejects a non-finite ramp target with a hard TypeError, and
+    //  this is the last place a bad number can be stopped before it becomes
+    //  one. Play() guards the gain it computes, but every caller passes its
+    //  own peak, so the check belongs here too - a silent note is a fair
+    //  price for never taking the frame down over a sound effect.
+    if (!isFinite(t0) || !isFinite(a) || !isFinite(d) || !isFinite(peak) ||
+      (sustain !== undefined && !isFinite(sustain)) || (rel && !isFinite(rel))) {
+      if (!Audio._badEnv) { Audio._badEnv = 1; console.warn('audio: non-finite envelope', { t0: t0, a: a, d: d, peak: peak, sustain: sustain, rel: rel }); }
+      return;
+    }
     var g = node.gain;
     g.cancelScheduledValues(t0);
     g.setValueAtTime(0.0001, t0);
@@ -147,11 +157,25 @@
     if (pos) {
       var dx = pos[0] - this.listener[0], dy = pos[1] - this.listener[1], dz = pos[2] - this.listener[2];
       var d = Math.sqrt(dx * dx + dy * dy + dz * dz);
+      //  NaN SURVIVES M.clamp. It is `x < a ? a : (x > b ? b : x)`, and both
+      //  comparisons are false for NaN, so a NaN distance comes straight back
+      //  out - and `NaN < 0.02` is false too, so the quiet-enough early-out
+      //  below waved it through into exponentialRampToValueAtTime, which
+      //  rejects non-finite values with a TypeError. That threw out of
+      //  Game.update and, with the identical stack twice in a row, took the
+      //  whole frame loop down. Caught in the wild by the new error capture
+      //  while digging: two throws, same stack, game over.
+      //
+      //  Test the distance itself rather than the clamped result: a bad
+      //  emitter position or a bad listener is not a quiet sound, it is a
+      //  sound with no position, and it should simply not play.
+      if (!isFinite(d)) return;
       gainScale = M.clamp(1 - d / 90, 0, 1);
       gainScale *= gainScale;
       if (gainScale < 0.02) return;
     }
     gainScale *= (vol === undefined ? 1 : vol);
+    if (!isFinite(gainScale)) return;          // a non-finite vol from a caller
     var t = now + 0.001;
     var r = this.rng;
     switch (name) {

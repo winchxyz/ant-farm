@@ -38,6 +38,8 @@
   var H = 0.60;                  // kernel radius AND hash cell size
   var SPACING = 0.30;            // rest spacing
   var PR = 0.17;                 // collision radius against the soil SDF
+  var RAD_WATER = 0.37;          // radius the renderer DRAWS a drop at
+  var RAD_SUGAR = 0.30;
   var SUB_DT = 1 / 120;
   var MAX_SUB = 2;
   var ITER = 2;
@@ -74,6 +76,11 @@
   // sleep
   var SLEEP_V = 0.05, SLEEP_T = 0.45, WAKE_V = 0.25;
 
+  //  The radius the RENDERER draws a particle at, which is not PR (the
+  //  collision radius against the soil). water_render.js sizes its blur
+  //  kernel from this so the filter always spans one sphere on screen; it
+  //  used to carry its own copy in a comment and a fixed ten-texel reach.
+  PS.RAD_WATER = RAD_WATER; PS.RAD_SUGAR = RAD_SUGAR;
   PS.H = H; PS.PR = PR; PS.SPACING = SPACING;
   PS.MAT_WATER = MAT_WATER; PS.MAT_SUGAR = MAT_SUGAR;
   PS.MU_DRY = MU_DRY; PS.MAX_RESIDENT = MAX_RESIDENT;
@@ -165,7 +172,7 @@
     vx[i] = ivx || 0; vy[i] = ivy || 0; vz[i] = ivz || 0;
     mat[i] = material;
     mass[i] = material === MAT_WATER ? MASS_WATER : MASS_SUGAR;
-    rad[i] = material === MAT_WATER ? 0.37 : 0.30;
+    rad[i] = material === MAT_WATER ? RAD_WATER : RAD_SUGAR;
     amt[i] = amount === undefined ? (material === MAT_WATER ? 0.55 : 0.42) : amount;
     wet[i] = 0; restT[i] = 0; cid[i] = -1;
     //  Every drop gets its own patience. Without the spread a puddle

@@ -22,6 +22,10 @@ AF.Game.resolveProps(...)  // the one push-out every surface mover calls
 AF.PS                      // fluid/grain sim: .spawn(mat,x,y,z,vx,vy,vz,farm) .px .py .pz .alive .mat .remove(i)
 AF.Wet                     // soil wetness volume: .add .tick .upload .at .stats — farm.wet holds one
 AF.WR                      // screen-space water renderer: .draw() .gather()
+AF.WR.thickScale           // thickness per splat - the knob that decides whether
+                           //   water has any colour at all. Live; see fixed 7.
+AF.WR.thickK               // thickness multiplier for absorption only, not coverage
+AF.WR.tint                 // how hard a one-particle film is tinted
 AF.__loop(tMs)             // step one frame by hand — drive time deterministically
 AF.__loopStrict(tMs)       // same, but rethrows instead of swallowing (see below)
 AF.Game.lastError          // stage, name, message, stack and a world snapshot of the last throw
@@ -31,7 +35,7 @@ AF.Game.errorLog           // the last 24 of them · AF.Game.clearErrors() wipes
 Deterministic frame stepping:
 
 ```js
-window.__T = 1e6;
+window.__T = performance.now();          // NOT 1e6 - see trap 5
 for (var i = 0; i < 300; i++) { window.__T += 16.7; AF.__loop(window.__T); }
 ```
 
@@ -97,17 +101,50 @@ for (var i = 0; i < 300; i++) { window.__T += 16.7; AF.__loop(window.__T); }
    Two things hide this. A *hidden* browser pane throttles rAF to nothing,
    so `Game.frame` stays 0, only manual steps advance the sim, and the two
    clocks never meet — the collision appears only on the runs where the pane
-   was visible at some point. And the missing lower clamp is a real gap in
-   `loop`: `performance.now()` is monotonic so live play cannot reach it,
-   but nothing in the frame body would survive a negative `dt` if it did.
+   was visible at some point.
 
-To A/B a rendering change, run the same measurement against the live site
-(old shader) and against localhost (new shader) — or, better, `git stash`
-the one file, measure, and restore it, so the water is identical in both
-runs. **Normalise against the water that is actually there**, not against
-"pixels that changed a lot": the latter counts the pool's own dim interior
-as halo and moves when the pour does. Project the live particles to screen
-and use that footprint as the denominator.
+   **`loop` now clamps `dt` at both ends** (`if (!(dt > 0)) dt = 0;`), which
+   closes the real gap this exposed: `performance.now()` is monotonic so live
+   play could not reach a negative `dt`, but a stalled or rewound clock could,
+   and nothing in the frame body survives one. Seed from `performance.now()`
+   anyway — a clamped `dt` of 0 still means the harness and rAF are fighting
+   over the same `last`.
+
+**To A/B a rendering change, freeze the particles.** This is the only method
+here that has produced a number worth trusting, and the round before it
+reported a 28% improvement on a change that turned out to do nothing at all
+(fixed 6). Pouring "the same" water twice does not give you the same water:
+it spreads, it soaks, the cluster the camera aims at is a different one, and
+the difference between the two builds disappears into the difference between
+the two pours.
+
+```js
+// once, on either build: settle a pour, then freeze everything that matters
+var fr = [];
+for (var i = 0; i < PS.MAX_RESIDENT; i++) {
+  if (!PS.alive[i] || PS.mat[i] !== PS.MAT_WATER) continue;
+  fr.push(PS.px[i], PS.py[i], PS.pz[i], PS.nbrN[i], PS.rad[i]);
+}
+localStorage.setItem('FROZEN', JSON.stringify(fr));   // survives the reload
+
+// on each build: replay it with the solver stubbed, so nothing can move
+var realStep = PS.step; PS.step = function () {};
+var ids = [];
+for (i = 0; i < fr.length; i += 5) ids.push(PS.spawn(PS.MAT_WATER, fr[i], fr[i+1], fr[i+2], 0,0,0, farm));
+for (i = 0; i < ids.length; i++) { PS.nbrN[ids[i]] = fr[i*5+3]; PS.rad[ids[i]] = fr[i*5+4]; }
+```
+
+`nbrN` and `rad` have to be restored by hand or every drop draws at 26% size
+(`VS_PART` shrinks lone particles), and `PS.step` has to be stubbed or
+re-spawning a settled configuration blows it apart — see open bug 2. Pin the
+camera to a fixed world point, not to the water's centroid.
+
+**Normalise against the water that is actually there**, not against "pixels
+that changed a lot": the latter counts the pool's own dim interior as halo
+and moves when the pour does. Project the live particles to screen, mark
+each one's disc, and use that footprint as the denominator. Beware that the
+mask ignores occlusion — at a shallow angle most of it can be behind a dune,
+which makes the water look invisible and the halo look enormous.
 
 ---
 
@@ -388,15 +425,29 @@ so a tunnel carved through a damp region shows damp walls. It is not saved:
 `save.js` stores no particles, no heap and no soil state, and a loaded
 colony has no water in it either.
 
-### 6. Water halo — reduced again, still not gone (see open bug 1)
+### 6. Water halo — gone, and it was the fabricated normals all along
 
 `src/water_render.js`.
 
-The previous round removed about 35% by gating Fresnel on thickness,
-dropping a 1.15 over-brighten, and raising the coverage ramp to 0.14. This
-round measured where the rest actually comes from, by switching post passes
-off one at a time against an identical frame. Of everything painted more
-than 16 px from real water:
+**Read the measurement note first: the round before this one claimed −28%
+and it was wrong.** That number came from one big-pool scene and did not
+generalise. Re-measured properly — identical 700 frozen particles, identical
+camera, one file swapped — the coverage/alpha work scored *identically to
+the original build*, to three significant figures. It removed nothing.
+
+| build | pale px outside the water | energy |
+|---|---|---|
+| original | 170,630 | 627.8 |
+| after the coverage/alpha round | 170,662 | 627.9 |
+| after the normal-flattening round | **1,838** | **5.95** |
+
+99%, and all of it from one change. The lesson is the same one this file
+keeps recording: a rendering A/B on a scene you happened to build is not a
+measurement. Freeze the particle state, stub `PS.step`, restore `nbrN` and
+`rad` by hand, and render the *same* input through both builds.
+
+Where it comes from, by switching post passes off one at a time against an
+identical frame. Of everything painted more than 16 px from real water:
 
 | pass | share |
 |---|---|
@@ -418,13 +469,25 @@ Two of the ledger's three leads are **refuted**, from the code:
   a ray at `uScale` 0.055, i.e. `th.r ≈ 0.13`. Lowering the floor further
   eats water, not halo.
 
-Lead (c) is confirmed and is now fixed properly. `FS_BLUR` already walks the
-exact neighbourhood that decides whether a fragment is near the silhouette,
-and the depth pass already writes alpha 1 where a particle landed — so
-box-averaging that alpha over the same reach costs two adds per tap and no
-extra fetch, and gives a real **silhouette confidence**. `FS_COMP` gates
-both Fresnel and the 190-exponent specular lobe on it, so nothing is derived
-from a normal the filter invented.
+Lead (c) is confirmed and is what actually mattered. `FS_BLUR` already walks
+the exact neighbourhood that decides whether a fragment is near the
+silhouette, and the depth pass already writes alpha 1 where a particle
+landed — so box-averaging that alpha over the same reach costs two adds per
+tap and no extra fetch, and gives a real **silhouette confidence**.
+
+The first attempt used it to *gate the reflection off* where the normal was
+suspect. That removes the ring and also removes the sheen from every pool
+too small to have a trusted middle: measured on a shallow spread, the water
+stopped being drawn at all. A pool lies on the ground, so the honest
+fallback is not "no reflection" but "flat" —
+
+```glsl
+N = normalize(mix(vec3(0.0,1.0,0.0), N, edge));
+```
+
+— and Fresnel is then computed from a normal the surface could plausibly
+have, everywhere. `nv` never collapses, so the mirror ring never forms, and
+small pools keep their sheen. **That one line is the 99%.**
 
 The other half was a half-applied fix. `oNormal` was written as
 `vec4((N*0.5+0.5)*cov, cov*0.03)` under `premul` — and under
@@ -440,23 +503,104 @@ Coverage also gates the depth write now, so a fragment drawn at 1% coverage
 no longer stamps a water surface into the buffer SSAO, DOF and the ink Sobel
 all read.
 
-Measured with **identical water** (seeded pour, same camera, one file
-swapped), normalising against the projected footprint of the live particles
-rather than against "pixels that changed":
+The wash in the original build was not a ring at all once you look at a
+whole frame: it lifted the *entire sheet of sand*. `tools/shots/H_orig.png`
+against `H_current.png` shows it plainly — same water, same camera, and the
+sand is visibly paler in the first.
 
-| | before | after |
+### 7. Water looked like a bag of blobs, then like nothing at all
+
+`src/water_render.js`, `src/shaders_post.js`, `src/particles.js`.
+
+Reported as "why does water now look like a lot of small blobs, it's not
+like a liquid", and then "I need flowing water with water physics". Four
+separate causes, and the first thing to establish was that **none of them
+were new**. The build before the halo work rendered the same shallow spread
+with **0 visibly-water pixels**: thin water was being discarded, not drawn.
+Fixing the halo stopped discarding it, and what appeared was the particle
+structure that had always been underneath. Nothing got worse; something
+stopped being hidden.
+
+**The blur could not reach across a particle.** `FS_BLUR` exists to melt
+neighbouring spheres into one sheet, and its reach was `#define R 10` —
+ten *texels*, at every zoom. `gl_PointSize` gives a particle
+`uPointScale*0.37/depth` pixels: about 9 across the tank at depth 55, and
+about 59 at depth 10. Zoomed out the kernel covered whole spheres and the
+pool read as liquid; zoomed in it smoothed a fifth of one and every sphere
+kept its own bump. The taps now stride by the projected particle radius, so
+the ten of them always span one sphere. The gaussian weight is unchanged
+because `i` is now counted in strides rather than texels.
+
+**Thickness was never filtered at all, and thickness carries the colour.**
+`exp(-uAbsorb*thick)` over a deep pool is already a smooth integral and
+nobody noticed; over a film one particle deep it has exactly one bump per
+particle, so the water came out as a pale sheet stamped with a blue dot at
+every sphere centre. That is the blob report. Widening the depth kernel does
+not touch it — measured, the dots survive unchanged. Added `FS_TBLUR`,
+masked by the depth buffer so it smooths the interior and cannot spread
+outward and re-open the halo, at half a particle radius (a full radius
+averages the film over a far larger area than its own variation and pulls
+the peak down to the area mean — the dots vanish and so does the colour).
+
+**Thin water was colourless because the thickness written per splat was ten
+times too small for a smoothed field.** `uScale` was 0.055, tuned when the
+peaks carried the colour and the gaps carried none. Swept against a real
+puddle, measuring the blue-minus-red shift the water introduces and how much
+it darkens what is behind it:
+
+| `uScale` | blue shift | darkening |
 |---|---|---|
-| pale brightening outside the water | 666 px | **480 px (−28%)** |
-| its energy | 2.30 | **1.71 (−26%)** |
-| anything painted outside the water | 13029 px | 12451 px (−4.4%) |
-| more than 16 px out | 4097 px | 3698 px (−9.7%) |
-| the water itself | 32585 px | 32124 px (−1.4%) |
+| 0.055 | 0.023 | 0.051 |
+| 0.10 | 0.230 | 0.132 |
+| **0.13** | **0.298** | **0.168** |
+| 0.16 | 0.367 | 0.217 |
 
-So: about another quarter of the pale wash, for 1.4% of the water. **Still
-not eliminated** — but see open bug 1, because what is left is no longer
-mostly the thing the ledger has been chasing.
+0.055 is the "water is transparent" report; 0.16 is poster paint. Safe to
+raise because the thickness blur is depth-masked, so a bigger number cannot
+push the film past its own silhouette. `uThickK` 1.0 → 2.2 alongside it,
+which scales thickness for absorption only and leaves coverage alone.
 
-### 7. Dragging the shovel skipped every follow-up
+**The ink pass stippled every pool with soot.** Confirmed by zeroing each of
+its two terms in turn: it is the **normal** term, `(1-dot(n,n0))*0.55`. The
+fluid composite writes its reconstructed normal into attachment 1, the Sobel
+finds "creases" in the filter's ripple, and draws a black mark at each one.
+Fixed at the source rather than in the ink pass — attachment 1 is read only
+by SSAO and the ink outline, neither of which is shading the water, and a
+pool is a horizontal sheet, so the composite now hands that buffer a
+flattened normal. Creases on ants, props and dug soil are untouched, and the
+depth term still draws the outline round the pool, which is wanted.
+
+While in there, the ink depth term was rewritten to measure in linear eye
+space. It was `abs(d-d0)/max(1.0-d0,1e-4)` on the raw depth-buffer value,
+which is not a distance: the buffer is 1/z, so the same physical step reads
+hundreds of times larger far away, and the `1/(1-d0)` amplifies exactly
+where the value is already densest. `linz()` both samples and divide by the
+local distance makes the test scale-free — a silhouette is a step of order
+the size of the thing casting it, a flat surface is a fraction of a percent.
+Grazing ground stops being inked for free.
+
+### 8. A negative `dt` could reach the whole frame body
+
+`src/main.js`.
+
+`loop` clamped `dt` from above and never from below. Nothing in the frame
+body survives a negative one: `Game.time` and `Game.sim.time` run backwards,
+every `damp()` and timer goes the wrong way, and an `AudioParam` ramp
+scheduled in the past throws outright — with a stack pointing at whatever
+happened to be making a noise, which is never where the fault is.
+
+`performance.now()` is monotonic so live play could not reach it, but the
+harness recipe this file used to prescribe could and did (trap 5), and a
+stalled or rewound clock would too. Now `if (!(dt > 0)) dt = 0;`.
+
+`Audio.play` and `Audio._env` were hardened in the same pass, because
+`M.clamp(NaN,0,1)` returns NaN — both comparisons are false for NaN — so a
+non-finite distance sailed through the quiet-enough early-out and into
+`exponentialRampToValueAtTime`. The distance is tested directly now, and
+`_env` refuses a non-finite envelope rather than taking the frame down over
+a sound effect.
+
+### 9. Dragging the shovel skipped every follow-up
 
 `src/excavate.js` — `Game.digScoop`, the scoop-merge branch.
 
@@ -478,7 +622,7 @@ single root cause behind three separate reports:
 Fixed by giving the merge branch the same three calls. After: floating
 props in a drag-dug cluster went **11 to 0**.
 
-### 8. Ground did not absorb water; water skated like ice
+### 10. Ground did not absorb water; water skated like ice
 
 `src/particles.js`.
 
@@ -505,7 +649,7 @@ Measured after: 700 poured, curve 700 → 526 → 356 → 165 → 56 → 21 → 
 ~48 s. Smooth, no cliff, drains to nothing. Peak solve 33.8 ms on a
 900-drop stress pour.
 
-### 9. Earlier, in this same area (already shipped)
+### 11. Earlier, in this same area (already shipped)
 
 - particles buried inside solid soil are skipped in `WR.gather()`
 - water colour is premultiplied for the `premul` composite
@@ -518,14 +662,13 @@ Measured after: 700 poured, curve 700 → 526 → 356 → 165 → 56 → 21 → 
 
 ### 1. Water halo — what is left is a dark surround, not a pale wash
 
-Measured after the fix above, against the projected footprint of the live
-particles: **480 px of faint brightening outside the water, carrying 1.71
-luminance-units in total** — against a water footprint of 62,861 px. The
-pale wash the ledger has been chasing since the beginning is now about 1%
-of the water's own area and is close to done.
+The pale wash is **done**: 170,630 px → 1,838 px on the matched measurement
+(fixed 6). What is recorded here is the remainder, which is a different
+thing and may not be a bug at all.
 
-What remains outside the water is **darkening**: 12,451 px carrying 132
-luminance-units, and it is 71% SSAO, 14% bloom, 9% `R.drawWet`. Some of that
+What remains outside the water is **darkening**: on the shallow-angle scene
+it measured 12,451 px carrying 132 luminance-units, 71% SSAO, 14% bloom, 9%
+`R.drawWet`. Some of that
 is legitimate — a puddle sitting on sand really does occlude the sand at its
 rim — but the *extent* is not: `aoRadius` 0.55 world units is ~24 px at
 depth 32, and the AO blur adds ~11 px on top.
@@ -569,12 +712,15 @@ test harness** — it did here. A 400-drop probe that spawned into a tight
 column with zero velocity sent the whole pour through the ceiling and read
 as "the wetness volume is broken".
 
-### 3. Residual stone penetration at 8x game speed
+### 3. Nothing here — the 8x stone residual closed
 
-3 ant-frames in 9000, worst 0.377 into a 1.596-radius rock, and only against
-the largest `bigrock`. Zero at 1x and 2x, 1 frame in 9000 at 4x. The cause
-is the interaction between a 0.40 s frame and the three-pass resolver; a
-fourth pass or a proper continuous sweep would close it. Not worth it yet.
+Kept as a note because it was open for one round and someone will look for
+it. It was 3 ant-frames in 9000 at 8x speed, worst 0.377 into a
+1.596-radius rock. Re-measured after the `dt` clamp (fixed 8) and the
+mushroom collision entry: **0 in 4000 ant-frames at 1x and 0 at 8x**, for
+all four solid prop kinds, and 0 in 700 frames for each of the five
+bestiary species driven straight at the big rock. `propBlockR` and the
+drawn radius are equal to three decimals for every kind.
 
 ---
 
