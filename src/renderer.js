@@ -310,12 +310,33 @@
     //  GLX.FBO at R.bloom[0] stays allocated and unused so that the
     //  pyramid's sizes, the `bw <= 8` stop and the bloomUp pairing are
     //  read from one place; dropping it would silently shorten the chain.
+    //  MIGRATION STAGE 2. A three-side mirror of the pyramid, same sizes and
+    //  same format. The GLX.FBO pyramid above stays allocated: it is what
+    //  decides the level count and the `bw <= 8` stop, and reading those
+    //  from one place is what keeps the two in step.
     if (AF.T3 && AF.T3.ready) {
-      if (R.bloomRT0) R.bloomRT0.dispose();
-      R.bloomRT0 = AF.T3.target(R.bloom[0].width, R.bloom[0].height);
-      if (!R.brightPass) R.brightPass = AF.T3.pass('bright', SP.BRIGHT_FS, {
-        uTex: null, uThreshold: 1.45, uSoft: 0.7
-      });
+      if (R.T3bloom) {
+        for (var q = 0; q < R.T3bloom.down.length; q++) {
+          R.T3bloom.down[q].dispose(); R.T3bloom.up[q].dispose();
+        }
+      }
+      var T = { down: [], up: [], texel: [] };
+      for (var m = 0; m < R.bloom.length; m++) {
+        var lw = R.bloom[m].width, lh = R.bloom[m].height;
+        T.down.push(AF.T3.target(lw, lh));
+        T.up.push(AF.T3.target(lw, lh));
+        T.texel.push(new THREE.Vector2(1 / lw, 1 / lh));
+      }
+      R.T3bloom = T;
+      if (!R.brightPass) {
+        R.brightPass = AF.T3.pass('bright', SP.BRIGHT_FS,
+          { uTex: null, uThreshold: 1.45, uSoft: 0.7 });
+        R.downPass = AF.T3.pass('down', SP.DOWN_FS,
+          { uTex: null, uTexel: new THREE.Vector2(1, 1) });
+        R.upPass = AF.T3.pass('up', SP.UP_FS,
+          { uTex: null, uPrev: null, uTexel: new THREE.Vector2(1, 1), uScatter: 1 });
+        R.copyPass = AF.T3.pass('copy', SP.COPY_FS, { uTex: null });
+      }
     }
   };
 
@@ -778,12 +799,37 @@
     //  material samples this renderer's textures through ExternalTexture,
     //  and raw passes sample three's targets through the WebGLTexture
     //  inside them.
-    if (R.brightPass) {
-      R.brightPass.render(R.bloomRT0, {
+    var last = R.bloom.length - 1;
+    if (R.T3bloom) {
+      //  MIGRATION STAGE 2. The whole bloom pyramid - bright, the down
+      //  chain, the copy at the smallest mip and the up chain - is drawn by
+      //  three. Only the composite still reads the result, and it does so
+      //  through T3.raw.
+      //
+      //  Every level moved together rather than one at a time: the up pass
+      //  reads bloomUp[i+1] AND bloom[i], so a half-converted pyramid means
+      //  a T3.raw call inside the inner loop for one level and not the
+      //  next, which is exactly the kind of asymmetry that hides a mistake.
+      var T = R.T3bloom;
+      R.brightPass.render(T.down[0], {
         uTex: AF.T3.extern(R.sceneFB.color[0]),
-        uThreshold: fx.bloomThreshold,
-        uSoft: 0.7
+        uThreshold: fx.bloomThreshold, uSoft: 0.7
       });
+      for (i = 1; i < T.down.length; i++) {
+        R.downPass.render(T.down[i], {
+          uTex: T.down[i - 1].texture,
+          uTexel: T.texel[i - 1]
+        });
+      }
+      R.copyPass.render(T.up[last], { uTex: T.down[last].texture });
+      for (i = last - 1; i >= 0; i--) {
+        R.upPass.render(T.up[i], {
+          uTex: T.up[i + 1].texture,
+          uPrev: T.down[i].texture,
+          uTexel: T.texel[i + 1],
+          uScatter: fx.bloomScatter
+        });
+      }
     } else {
       R.bloom[0].bind(false);
       P = R.P.bright; P.use();
@@ -791,31 +837,28 @@
       P.f('uThreshold', fx.bloomThreshold);
       P.f('uSoft', 0.7);
       GLX.fullscreen();
-    }
-    P = R.P.down;
-    for (i = 1; i < R.bloom.length; i++) {
-      R.bloom[i].bind(false);
-      P.use();
-      var srcTex = (i === 1 && R.brightPass) ? AF.T3.raw(R.bloomRT0) : R.bloom[i - 1].color[0];
-      P.use();
-      P.tex('uTex', srcTex);
-      P.v2('uTexel', 1 / R.bloom[i - 1].width, 1 / R.bloom[i - 1].height);
+      P = R.P.down;
+      for (i = 1; i < R.bloom.length; i++) {
+        R.bloom[i].bind(false);
+        P.use();
+        P.tex('uTex', R.bloom[i - 1].color[0]);
+        P.v2('uTexel', 1 / R.bloom[i - 1].width, 1 / R.bloom[i - 1].height);
+        GLX.fullscreen();
+      }
+      R.bloomUp[last].bind(false);
+      P = R.P.copy; P.use();
+      P.tex('uTex', R.bloom[last].color[0]);
       GLX.fullscreen();
-    }
-    var last = R.bloom.length - 1;
-    R.bloomUp[last].bind(false);
-    P = R.P.copy; P.use();
-    P.tex('uTex', R.bloom[last].color[0]);
-    GLX.fullscreen();
-    P = R.P.up;
-    for (i = last - 1; i >= 0; i--) {
-      R.bloomUp[i].bind(false);
-      P.use();
-      P.tex('uTex', R.bloomUp[i + 1].color[0]);
-      P.tex('uPrev', (i === 0 && R.brightPass) ? AF.T3.raw(R.bloomRT0) : R.bloom[i].color[0]);
-      P.v2('uTexel', 1 / R.bloomUp[i + 1].width, 1 / R.bloomUp[i + 1].height);
-      P.f('uScatter', fx.bloomScatter);
-      GLX.fullscreen();
+      P = R.P.up;
+      for (i = last - 1; i >= 0; i--) {
+        R.bloomUp[i].bind(false);
+        P.use();
+        P.tex('uTex', R.bloomUp[i + 1].color[0]);
+        P.tex('uPrev', R.bloom[i].color[0]);
+        P.v2('uTexel', 1 / R.bloomUp[i + 1].width, 1 / R.bloomUp[i + 1].height);
+        P.f('uScatter', fx.bloomScatter);
+        GLX.fullscreen();
+      }
     }
 
     // dof
@@ -843,7 +886,7 @@
     if (fx.rays > 0.001 && fx.sunOnScreen) {
       R.raysFB.bind(false);
       P = R.P.copy; P.use();
-      P.tex('uTex', R.bloom[1].color[0]);
+      P.tex('uTex', (R.T3bloom ? AF.T3.raw(R.T3bloom.down[1]) : R.bloom[1].color[0]));
       GLX.fullscreen();
       R.raysFB2.bind(false);
       P = R.P.godray; P.use();
@@ -862,7 +905,7 @@
     R.compFB.bind(false);
     P = R.P.comp; P.use();
     P.tex('uColor', R.sceneFB.color[0]);
-    P.tex('uBloom', R.bloomUp[0].color[0]);
+    P.tex('uBloom', R.T3bloom ? AF.T3.raw(R.T3bloom.up[0]) : R.bloomUp[0].color[0]);
     P.tex('uAO', R.aoFB.color[0]);
     P.tex('uDOF', R.dofB.color[0]);
     P.tex('uRays', R.raysFB2.color[0]);
