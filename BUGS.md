@@ -35,7 +35,7 @@ window.__T = 1e6;
 for (var i = 0; i < 300; i++) { window.__T += 16.7; AF.__loop(window.__T); }
 ```
 
-**Four traps that made earlier verification worthless — do not repeat them:**
+**Five traps that made earlier verification worthless — do not repeat them:**
 
 1. **Browser-pane screenshots come back black.** The WebGL canvas is not
    composited into them. Read pixels instead, inside the *same* JS task as
@@ -74,6 +74,33 @@ for (var i = 0; i < 300; i++) { window.__T += 16.7; AF.__loop(window.__T); }
    measurement does not want.** Use `AF.__loopStrict(t)` when you are
    measuring: it records the error the same way and then rethrows.
 
+5. **Seed `window.__T` from `performance.now()`, not from `1e6`.** The
+   snippet above manufactures crashes that are not in the game. `loop`
+   clamps `dt` from above (`if (dt > 0.25)`) but never from below, and it
+   re-arms `requestAnimationFrame` on every call — so once manual stepping
+   has pushed `last` out to 1e6 ms, the next *real* rAF tick arrives with a
+   `now` of maybe 30,000 and hands the frame a `dt` of about **-970
+   seconds**. `Game.time` goes negative and the first thing to fail on it is
+   an `AudioParam` ramp scheduled in the past:
+
+   ```
+   frame error in update TypeError: ... 'exponentialRampToValueAtTime' ...
+   non-finite   {frame: 180, simTime: -842.78, day: 1, state: play}
+   ```
+
+   The stack reads `Audio._env` ← `Audio.play` ← `Ant.doForage` and looks
+   exactly like a live foraging bug. It is not one. **`simTime` in the
+   snapshot is the tell: if it is negative, the harness broke, not the
+   game.** `window.__T = performance.now()` puts both clocks on one
+   timeline; 4600 strict frames then run clean.
+
+   Two things hide this. A *hidden* browser pane throttles rAF to nothing,
+   so `Game.frame` stays 0, only manual steps advance the sim, and the two
+   clocks never meet — the collision appears only on the runs where the pane
+   was visible at some point. And the missing lower clamp is a real gap in
+   `loop`: `performance.now()` is monotonic so live play cannot reach it,
+   but nothing in the frame body would survive a negative `dt` if it did.
+
 To A/B a rendering change, run the same measurement against the live site
 (old shader) and against localhost (new shader) — or, better, `git stash`
 the one file, measure, and restore it, so the water is identical in both
@@ -86,7 +113,80 @@ and use that footprint as the denominator.
 
 ## Fixed — with the mechanism and the measurement
 
-### 1. Every camera pan threw, and killed the game (the `state: 'error'` bug)
+### 1. `buildMushroom` built the cap in the wrong place, and the collider followed it there
+
+`src/geometry.js`. A `Builder` carries one rotation until something clears
+it. The stem is a `limb`, and `limb` runs along +z, so it is built under
+`rotEuler(-PI/2, 0, 0)` to stand upright. The cap immediately below is
+authored in world axes — its `y` already has `stemH` added in — and nothing
+reset the builder in between, so the cap went through the stem's rotation
+too: `(x,y,z) → (x, z, -y)`. The stem came out correctly vertical; the cap
+came out as a vertical disc lying on the sand *behind* it, which is why it
+read as a dartboard in the dirt.
+
+The fix is `b.reset()` between the two, which is what every other builder in
+the file already does between limbs.
+
+Measured bbox of `buildMushroom(0)`:
+
+| axis | before | after |
+|---|---|---|
+| x | -0.226..0.226 | -0.226..0.226 |
+| y | -0.226..0.462 | **-0.029..0.584** |
+| z | **-0.584..0.067** | -0.226..0.218 |
+
+The 0.584 that was the cap's reach along the ground is its height now, z is
+symmetric about the stem, and the -0.029 is the limb's rounded base cap at
+`-r0*0.6`, buried in the sand like every other limb in the game. Silhouette
+radius (`Batch.meshR`, the number `propBlockR` reads): **0.584 → 0.238**.
+
+**The collision entry moved with it.** The previous pass recorded, on the
+entry itself, why `PROP_DRAW.mushroom` blocked at its silhouette: with the
+cap on the ground the disc *was* the visible object, and pinning collision to
+a 0.070 stem in the middle of it would have been the same mistake that table
+exists to remove — defending a circle that is not the one on screen. That
+reason is gone. Measured on the fixed mesh over seeds 0..5:
+
+- the stem is the limb, radius 0.048 at the sand to **0.070** under the cap
+- the lowest point of the cap is y **0.332** (0.329..0.332 across seeds)
+- `pushProps` spawns mushrooms at `p.scale` 0.45..1.15, so the cap underside
+  sits 0.149..0.382 above the sand, against a worker ant 0.317 mesh at
+  instance scale 0.52 — **0.165** tall
+
+So the cap is overhead and the stem is what a body walks into. `rFix: 0.070`
+is back on the entry and `propBlockR` honours it again. Blocking radius for a
+mushroom at the smallest, middle and largest spawn scale:
+
+| p.scale | broken mesh, silhouette | fixed mesh, silhouette | shipped (`rFix`) |
+|---|---|---|---|
+| 0.45 | 0.263 | 0.107 | **0.032** |
+| 0.80 | 0.467 | 0.190 | **0.056** |
+| 1.15 | 0.672 | 0.274 | **0.081** |
+
+The middle column is the open air that would be fenced off around every stem
+in the tank — 60 of them in the rot biome, 44 in the jungle — by a disc drawn
+where nothing solid is.
+
+On the real path, not the harness: a loam tank started through the menu and
+driven 4000 frames through `AF.__loopStrict`, **23,538 surface ant-frames**
+against its four mushrooms. The two the foragers actually walked past were
+approached to **0.263** and **0.253** of the stem, where the radius shipping
+before this change would have stopped them at 0.435 and 0.342. No ant ended
+up inside any prop on any frame, mushroom or otherwise. Note what this does
+*not* show: the soak never routed an ant under a cap, so "an ant walks under
+it" remains an argument from the geometry — cap underside 0.332·s against a
+worker 0.165 tall — and not a measurement.
+
+`rFix` is the documented exception to "block at the outline" and it is the
+only one. It does mean a spider (0.98 tall) walks through a cap it could not
+fit under: the collider has no height term, there is one disc per prop, so
+the choice is which single circle to defend. Leaf and grass are already
+fully passable on the same reasoning.
+
+`node tools/check.js` (27 meshes) and `node tools/glsl_lint.js` (34 shaders)
+both pass. Cache key bumped to `v=91`.
+
+### 2. Every camera pan threw, and killed the game (the `state: 'error'` bug)
 
 `src/input.js`, `Rig.update`, the mouse-pan branch.
 
@@ -134,7 +234,7 @@ There is now one predicate — `Input.prototype.panGesture` / `orbitGesture` /
 `camGesture` — and all five callers ask it instead of each re-deriving half
 of it.
 
-### 2. Frame errors kept nothing and stopped nothing
+### 3. Frame errors kept nothing and stopped nothing
 
 `src/main.js`.
 
@@ -152,7 +252,7 @@ terminal on the second occurrence of an identical stack, the second
 `update` throw in a 4 s window, or eight errors of any kind in that window.
 `AF.__loopStrict` rethrows for measurement, `Game.clearErrors()` resumes.
 
-### 3. Ants and creatures walked through stones — the radius was never the one on screen
+### 4. Ants and creatures walked through stones — the radius was never the one on screen
 
 `src/game.js` (`Game.PROP_DRAW`, `propBlockR`, `propAxis`, `resolveProps`),
 `src/renderer.js` (`Batch.meshR`), `src/ants.js`, `src/creatures.js`,
@@ -189,7 +289,8 @@ Measured, driving ten ants back and forth across that rock through the real
 All five bestiary species, driven straight at the same rock for 900 frames
 each: **0 frames inside**, every one of them. Every solid kind separately,
 5000 ant-frames each: 0 at 1x. `propBlockR` and the drawn radius are now
-equal by construction, for every kind.
+equal by construction, for every kind. *(One exception since: `mushroom`
+blocks at its stem and not its outline — fixed entry 1.)*
 
 The fix is one table. `Game.PROP_DRAW` holds the instance scale and the y
 lift for each kind; `render_scene.js` draws from it and `propBlockR` blocks
@@ -234,7 +335,7 @@ Colony health is unchanged: 33 ants on day 2 with food rising. (The note
 below about `stickToSurface` records an earlier movement change that took
 population 34 → 3 by day 2; this one does not.)
 
-### 4. Ground now looks wet where the water soaked in
+### 5. Ground now looks wet where the water soaked in
 
 `src/particles.js` (`AF.Wet` + `PS.soakIntoSoil`), `src/shaders.js`
 (`S.WETLIB`, `SOIL_FS`), `src/renderer.js`, `src/gl.js`
@@ -287,7 +388,7 @@ so a tunnel carved through a damp region shows damp walls. It is not saved:
 `save.js` stores no particles, no heap and no soil state, and a loaded
 colony has no water in it either.
 
-### 5. Water halo — reduced again, still not gone (see open bug 1)
+### 6. Water halo — reduced again, still not gone (see open bug 1)
 
 `src/water_render.js`.
 
@@ -355,7 +456,7 @@ So: about another quarter of the pale wash, for 1.4% of the water. **Still
 not eliminated** — but see open bug 1, because what is left is no longer
 mostly the thing the ledger has been chasing.
 
-### 6. Dragging the shovel skipped every follow-up
+### 7. Dragging the shovel skipped every follow-up
 
 `src/excavate.js` — `Game.digScoop`, the scoop-merge branch.
 
@@ -377,7 +478,7 @@ single root cause behind three separate reports:
 Fixed by giving the merge branch the same three calls. After: floating
 props in a drag-dug cluster went **11 to 0**.
 
-### 7. Ground did not absorb water; water skated like ice
+### 8. Ground did not absorb water; water skated like ice
 
 `src/particles.js`.
 
@@ -404,7 +505,7 @@ Measured after: 700 poured, curve 700 → 526 → 356 → 165 → 56 → 21 → 
 ~48 s. Smooth, no cliff, drains to nothing. Peak solve 33.8 ms on a
 900-drop stress pour.
 
-### 8. Earlier, in this same area (already shipped)
+### 9. Earlier, in this same area (already shipped)
 
 - particles buried inside solid soil are skipped in `WR.gather()`
 - water colour is premultiplied for the `premul` composite
@@ -468,22 +569,7 @@ test harness** — it did here. A 400-drop probe that spawned into a tight
 column with zero velocity sent the whole pour through the ceiling and read
 as "the wetness volume is broken".
 
-### 3. `buildMushroom` builds the cap in the wrong place
-
-`src/geometry.js`. The builder's rotation is set to -PI/2 for the stem limb
-and never reset, so the cap inherits it: (x,y,z) → (x, z, -y). The stem
-comes out correctly vertical and the cap comes out as a *vertical disc lying
-on the sand behind it*. Measured bbox of `buildMushroom(0)`: x -0.226..0.226,
-**y -0.226..0.462, z -0.584..0.067** — the z extent is the cap, on the
-ground, where its y extent should be.
-
-Not fixed here because it is a geometry bug and this pass was about the four
-open entries above. It does affect them: `PROP_DRAW.mushroom` blocks at the
-silhouette (0.584·s) because the silhouette is what a player sees, and once
-the cap is a dome on top of the stem the right answer is probably the stem
-radius (0.070) plus a cap the ant walks under.
-
-### 4. Residual stone penetration at 8x game speed
+### 3. Residual stone penetration at 8x game speed
 
 3 ant-frames in 9000, worst 0.377 into a 1.596-radius rock, and only against
 the largest `bigrock`. Zero at 1x and 2x, 1 frame in 9000 at 4x. The cause

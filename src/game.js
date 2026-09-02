@@ -277,7 +277,7 @@
   //    bigrock   p.scale          0.898  B.pebble    0.898*p.scale
   //    pebble    p.scale * 0.55   0.895  B.pebbleSm  0.492*p.scale
   //    leaf      p.scale          1.258  B.leaf      1.258*p.scale
-  //    mushroom  p.scale          0.584  B.mushroom  0.584*p.scale
+  //    mushroom  p.scale          0.238  B.mushroom  0.238*p.scale
   //    twig      p.scale * 0.70   2.423  B.twig      1.696*p.scale
   //
   //  A bigrock is rng.range(1.1, 2.1), so the biggest stone in the tank is
@@ -309,17 +309,35 @@
   Game.PROP_DRAW = {
     grass: { batch: 'grass', s: 1.00, yMul: 0, yAdd: 0, solid: 0 },
     leaf: { batch: 'leaf', s: 1.00, yMul: 0, yAdd: 0.04, solid: 0 },
-    //  Blocked at its silhouette like everything else. An earlier draft
-    //  pinned this to the 0.070 stem on the grounds that an ant walks under
-    //  the cap - but the cap is not over the stem. buildMushroom never
-    //  resets the builder rotation after building the stem limb, so the cap
-    //  inherits it and comes out as a vertical disc lying on the sand behind
-    //  the stem (measured bbox y -0.226..0.462, z -0.584..0.067). Until that
-    //  mesh is fixed the visible object IS the disc on the ground, and
-    //  blocking a 0.07 stem in the middle of it would be the same bug this
-    //  whole table exists to remove: defending a circle that is not the one
-    //  on screen.
-    mushroom: { batch: 'mushroom', s: 1.00, yMul: 0, yAdd: 0, solid: 1 },
+    //  THE ONE KIND WHOSE OUTLINE IS NOT WHAT STOPS YOU.
+    //
+    //  buildMushroom is fixed (geometry.js): the cap is a dome on the stem
+    //  now, bbox y -0.029..0.584 with z a symmetric -0.226..0.218, where the
+    //  broken mesh laid the cap flat on the sand behind the stem and put its
+    //  whole extent in z. The silhouette radius came down 0.584 -> 0.238 with
+    //  it, and the entry that blocked at the silhouette went with the disc it
+    //  was defending.
+    //
+    //  0.238 is the cap, and the cap is overhead. Measured on the fixed mesh:
+    //  the stem is the limb, 0.048 at the sand to 0.070 under the cap, and
+    //  the lowest point of the cap is y 0.332 (0.329..0.332 over seeds 0..5).
+    //  pushProps spawns mushrooms at p.scale 0.45..1.15, so the cap underside
+    //  sits 0.149..0.382 above the sand while a worker ant is 0.317 mesh at
+    //  instance scale 0.52 - 0.165 tall. A worker clears the cap on every
+    //  mushroom but the very smallest, and what it walks INTO is the stem.
+    //
+    //  Blocking the 0.238 cap would fence off open air: a wall 0.107..0.274
+    //  out from a stem 0.032..0.081 wide, round every mushroom in the tank -
+    //  60 of them in the rot biome, 44 in the jungle. So rFix overrides the
+    //  silhouette with the stem, mesh-space like every other radius here and
+    //  scaled by S.s the same way.
+    //
+    //  This does mean a spider (0.98 tall) walks through a cap it cannot fit
+    //  under. The collider carries no height term - there is one disc per
+    //  prop - so the choice is which circle to defend, and the stem is the
+    //  only one a body ever actually meets. Leaf and grass are already fully
+    //  passable on the same reasoning.
+    mushroom: { batch: 'mushroom', s: 1.00, yMul: 0, yAdd: 0, solid: 1, rFix: 0.070 },
     pebble: { batch: 'pebbleSm', s: 0.55, yMul: 0.20, yAdd: 0, solid: 1 },
     bigrock: { batch: 'pebble', s: 1.00, yMul: 0.35, yAdd: 0, solid: 1 },
     //  A CAPSULE, not a disc - the one prop whose origin is not its centre.
@@ -359,6 +377,11 @@
       //  A capsule carries its own thickness; the mesh silhouette radius
       //  would be half the stick's LENGTH and means nothing here.
       if (S.rad !== undefined) S._r = S.rad * S.s;
+      //  A kind blocked somewhere other than its outline says so, and is
+      //  answered without the renderer - the number is the mesh's, not a
+      //  measurement of it. Mushroom is the only one: the stem stops you,
+      //  the cap is overhead.
+      else if (S.rFix !== undefined) S._r = S.rFix * S.s;
       else if (R.B && R.B[S.batch]) S._r = R.B[S.batch].meshR * S.s;
       //  No renderer yet (headless harness). Answer, but do not cache a
       //  guess where the measured value belongs.

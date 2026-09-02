@@ -525,6 +525,16 @@
     // stem
     b.reset().setPart(0, 0, 0, 2).rotEuler(-Math.PI / 2, 0, 0);
     b.limb(stemH, 0.048, 0.070, 10, 3, 0, 0.55);
+    //  CLEAR THE STEM'S ROTATION BEFORE THE CAP.
+    //
+    //  limb() runs along +z, so the stem needs rotEuler(-PI/2) to stand up.
+    //  The cap below is authored directly in world axes - its y already has
+    //  stemH added in - so it must be built with no rotation at all. Leaving
+    //  the stem's rotation set fed the cap through (x,y,z) -> (x, z, -y) and
+    //  laid it flat on the sand behind the stem, a vertical disc reading as a
+    //  dartboard in the dirt: bbox y -0.226..0.462, z -0.584..0.067, with the
+    //  cap's whole extent in z where it belonged in y.
+    b.reset();
     // cap: a domed skirt with a rolled rim, built as a lathe so the
     // underside is a real surface the light can catch
     var segU = 18, segV = 8;
