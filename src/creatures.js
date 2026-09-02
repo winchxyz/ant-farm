@@ -136,7 +136,7 @@
       if (this.player.biomass < d.cost) { this.audio.play('deny'); return null; }
       this.player.biomass -= d.cost;
     }
-    var y = farm.localTop(x, z);
+    var y = farm.surfaceTop(x, z);
     var c = {
       def: d, key: key, farm: farm,
       pos: v3.create(x, y, z), yaw: this.rng.range(0, M.TAU), phase: 0,
@@ -311,7 +311,7 @@
       Game.resolveProps(c.farm, c.pos, d.scale * 0.42,
         c.farm.half[0] - 0.8, c.farm.half[2] - 0.8, wasX, wasZ);
       //  ride the terrain, and the sugar heap on top of it
-      var ground = c.farm.localTop(c.pos[0], c.pos[2]);
+      var ground = c.farm.surfaceTop(c.pos[0], c.pos[2]);
       if (AF.Heap) ground = Math.max(ground, AF.Heap.surfaceAt(c.pos[0], c.pos[2]));
       c.pos[1] = M.damp(c.pos[1], ground, 12, dt);
       if (vl > 0.05 && !c.feeding) c.yaw = M.angleLerp(c.yaw, Math.atan2(vx, vz), dt * 5);
@@ -322,7 +322,12 @@
         best.hit(d.dmg, c.proxy, this);
         this.fx.burst(best.pos, 8, 'gore', best.colony.color);
         this.audio.play('bite', c.pos, 1.6);
-        if (best.colony.isPlayer) this.fx.shake(0.20);
+        //  No screen shake on a bite. A spider chews a worker every 0.62s
+        //  and a centipede faster, so a raid used to shake the camera almost
+        //  continuously - which reads as a broken camera, not as danger. The
+        //  bite still has its sound and its spray of gore. Shake is kept for
+        //  the one-off events that genuinely jolt the tank (the shelf being
+        //  moved, in game.js).
       }
       c.proxy.pos = c.pos;
     }
@@ -338,7 +343,7 @@
   Game.dropCarcass = function (c) {
     var d = c.def || BESTIARY.spider;
     var farm = c.farm;
-    var y = farm.localTop(c.pos[0], c.pos[2]);
+    var y = farm.surfaceTop(c.pos[0], c.pos[2]);
     this.items.push({
       type: 'protein', visual: 'carcass',
       pos: v3.create(c.pos[0], y, c.pos[2]),

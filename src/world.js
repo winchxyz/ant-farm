@@ -164,8 +164,37 @@
     this.humid = this.biome.humid;
   }
 
+  //  The ANALYTIC terrain height. It is a closed-form function of x and z
+  //  and it knows nothing whatever about digging - dig a pit two units deep
+  //  and this returns exactly what it returned before. Use it for the shape
+  //  of the untouched landscape, never for "where is the ground here".
   Farm.prototype.localTop = function (x, z) {
     return this.topY + W.surfaceH(x - this.center[0], z - this.center[2]);
+  };
+
+  //  WHERE THE GROUND ACTUALLY IS, dug holes included.
+  //
+  //  Everything that stands on the surface was riding localTop, which is why
+  //  digging a pit under a column of ants left them jogging through the air
+  //  across the top of it: the scoop removed the soil and the number they
+  //  were standing on never moved. Measured on a fresh tank - sixty scoops
+  //  at one spot, localTop before 6.11, after 6.11.
+  //
+  //  Start at the analytic top and march down the real distance field until
+  //  something solid is under the sample. On undug ground the very first
+  //  test is already inside soil and this costs one SDF lookup, which is why
+  //  it is affordable three times per ant per frame.
+  var TOP_STEP = 0.14, TOP_MAX = 6.0;
+  Farm.prototype.surfaceTop = function (x, z) {
+    var top = this.topY + W.surfaceH(x - this.center[0], z - this.center[2]);
+    if (!this.soilSDF) return top;
+    if (this.soilSDF(x, top - 0.02, z) <= 0) return top;
+    for (var d = TOP_STEP; d < TOP_MAX; d += TOP_STEP) {
+      if (this.soilSDF(x, top - d, z) <= 0) return top - d + TOP_STEP * 0.5;
+    }
+    //  A shaft straight down with no floor within reach. Sit at the bottom
+    //  of the search rather than hovering at the old surface.
+    return top - TOP_MAX;
   };
   // keep excavation inside the visible slab behind the front pane
   Farm.prototype.slabZ = function (rng) {

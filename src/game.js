@@ -1228,7 +1228,7 @@
         best.hit(13, p.proxy, this);
         this.fx.burst(best.pos, 8, 'gore', best.colony.color);
         this.audio.play('bite', p.pos, 1.6);
-        if (best.colony.isPlayer) this.fx.shake(0.25);
+        //  and the same for the legacy predator path - see creatures.js
       }
       p.proxy.pos = p.pos;
     }

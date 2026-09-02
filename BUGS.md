@@ -15,7 +15,9 @@ The game exposes its internals, so bugs can be measured instead of guessed.
 
 ```js
 AF.Game                    // Game.digScoop, Game.pruneFloatingProps, Game.scoops, Game.DIG
-AF.Game.player.farms[0]    // the tank: .props .soilSDF(x,y,z) .localTop(x,z) .digZ .center .half
+AF.Game.player.farms[0]    // the tank: .props .soilSDF(x,y,z) .digZ .center .half
+  .localTop(x,z)           //   ANALYTIC terrain height - ignores every scoop
+  .surfaceTop(x,z)         //   where the ground REALLY is, dug holes included
 AF.Game.PROP_DRAW          // how each prop kind is drawn AND how solid it is
 AF.Game.propBlockR(prop)   // its blocking radius, the same number the renderer draws
 AF.Game.resolveProps(...)  // the one push-out every surface mover calls
@@ -150,7 +152,154 @@ which makes the water look invisible and the halo look enormous.
 
 ## Fixed — with the mechanism and the measurement
 
-### 1. `buildMushroom` built the cap in the wrong place, and the collider followed it there
+### 1. Ants ran in the air over anything you dug
+
+`src/world.js`, `src/ants.js`, `src/creatures.js`, `src/heap.js`.
+
+`Farm.localTop` is `topY + surfaceH(x, z)` — a closed-form function of two
+coordinates that knows nothing whatever about excavation. Every surface
+mover stood on it. Measured: sixty scoops at one spot, `localTop` **6.11
+before, 6.11 after**. Dig a pit under a column of foragers and they keep
+walking at the height the ground used to be.
+
+`heap.js` already had the right answer and had had it for releases — a
+private `soilTopAt` that starts at the analytic top and marches the real
+distance field down to solid. That is why *objects* rest on dug ground and
+ants did not: two implementations of "where is the ground", only one of them
+correct, and nothing pointing the second at the first.
+
+Promoted to `Farm.surfaceTop(x, z)`, which `heap.js` now delegates to. Ants
+use it for standing height and for the two probes that set pitch and roll,
+creatures for walking, spawning and carcass placement. On undug ground the
+first sample is already inside soil, so it costs one SDF lookup, which is
+what makes it affordable three times per ant per frame.
+
+After: same pit reads **6.11 analytic, 2.54 real**, and an ant driven across
+it has a worst air gap of **0.000** over 200 frames.
+
+### 2. Every bite shook the camera
+
+`src/creatures.js`, `src/game.js`.
+
+A wolf spider bites every 0.62 s and a centipede faster, and each bite called
+`fx.shake`. A raid therefore shook the camera continuously, which does not
+read as danger — it reads as a broken camera. Removed from both predator
+paths; the bite keeps its sound and its spray of gore. Shake survives only
+where something genuinely jolts the tank, which is the shelf tremor.
+
+Measured: 900 frames with a spider hunting a live colony, **0 shake calls**.
+
+### 3. Digging under a sugar heap shattered it into blades
+
+`src/heap.js`.
+
+Pour sugar, dig the soil out from under it, and the heap came apart into a
+crown of white spikes and slivers — the "shards fly off the sugar" report.
+
+The sugar physics were fine: the height field slumped into the hole exactly
+as it should, measured 1.3–1.8 units of sugar sitting on a pit floor at 3.0
+where it had been at 7.2. The fault is one line in the mesh builder. A quad
+is a patch of ground with sugar on it and its corners sit at `gnd + H`;
+nothing checked whether those four grounds belonged to the same surface.
+Sampled across the pit rim: ground **7.24 at one node and 3.19 at the next,
+0.22 apart**. The quad spanning that is a three-metre vertical blade one
+cell wide, and there is one for every cell along the rim.
+
+There is no such surface. The sugar on the lip and the sugar that slumped
+into the hole are two separate sheets. The builder now skips a quad whose
+four ground samples span more than `CELL * 4` — repose is `0.66 * CELL`, so
+that is about four times the steepest wall sugar can actually hold, and no
+real slope can reach it. A heap poured on ordinary sloping ground is
+unchanged: 750 triangles, one continuous mound, no holes.
+
+### 4. You could not see the queen lay, and the nursery was always empty
+
+`src/colony.js`, `src/ants.js`, `src/render_scene.js`.
+
+Two reports, one cause. An egg hatched in about ten seconds and one was laid
+every six, so the standing brood population was **1.5 — measured over 3000
+frames, never more than 2 at once**. All three stages worked perfectly and
+had done all along; there was simply almost never anything in the chamber to
+look at, which is what "ants have no larvae" means.
+
+Development and laying are now scaled by the same factor, `BROOD_SPREAD`, so
+ants per minute, food per egg and every balance number built on them are
+untouched — measured 14 born in 70 s against ~12.6 before. What changes is
+how many are in the pile at once: **2 → 16**, with eggs, larvae and pupae
+all present together.
+
+And the laying itself was invisible. The egg appeared in the middle of the
+nursery with three sparkles fired at the queen, who might be in another
+chamber entirely. It is now born *at her*, drifts to its place over a second
+and a half, and she takes a visible beat over it — `layT`, a dip and a
+slight swell, decayed in `Ant.update` and read by the renderer. Measured:
+**115 laying poses** in 4200 frames.
+
+### 5. Sugar and protein were added together and shown as one number
+
+`src/ui.js`, `index.html`.
+
+The HUD read `p.sugar + p.protein + p.water` into a single FOOD figure. A
+colony drowning in sugar with no meat looked exactly like a balanced one,
+and the beetle four soldiers died killing — then butchered and hauled home
+piece by piece — moved the same number a spoonful of sugar moves. `layEggs`
+spends the two in a fixed ratio, so which one you are short of decides
+whether the queen can lay at all, and the player could not see it.
+
+Split into SUGAR and PROTEIN. The bar still holds at 900 px with nothing
+clipped.
+
+`index.html` was also **double-encoded UTF-8** — the HUD icons were
+rendering as `â—†`, `â–¤`, `âœ¦` and the boot line as `substrateâ€¦`. This is
+the failure the constraints section at the bottom of this file warns about,
+already in the tree. Repaired to `◆ ▤ ✦ …`; the repair has to be done run by
+run, because parts of the file (`·` in the credit line) are correct Latin-1
+and re-decoding the whole thing destroys them.
+
+### 6. Water soaked away for ever, so a pool could not exist
+
+`src/particles.js`.
+
+The soak model had no concept of capacity: touch soil for `SOAK_TIME`
+seconds and vanish, however wet that patch of ground already was. Fill a dug
+basin to the brim and forty seconds later it is dry, which is not what a
+basin does.
+
+Real ground has a capacity, and the wetness volume added for the damp-patch
+work *is* that capacity — already indexed by position, already written by
+this very function, already drained by the drying tick. It was never read. A
+drop now only drains where the soil under it still has room, so the first
+water into dry ground soaks away, the rest sits on top once that patch is
+saturated, and as the drying tick pulls the wetness down the pool starts
+seeping again from the bottom.
+
+Measured: **700 poured into a dug basin, 699 still there after 36 s**, soil
+saturating at 0.73 and levelling off. Previously the same pour drained to
+nothing in about 45 s.
+
+That fix has a cost, and it is worth knowing about: persistent water
+*accumulates*, and `soakIntoSoil` walked every live drop every frame doing
+an SDF lookup with a gradient for each. Measured **22.9 ms a frame with 906
+drops against 1.9 ms with none**. It is now amortised over six frames at six
+times the elapsed time, so every drop advances at the same average rate and
+the drain curve is unchanged: **4.8 ms, and the pool still holds**.
+
+### 7. The pour indicator slid off to somewhere you had not aimed
+
+`src/render_scene.js`.
+
+`updatePourGhost` runs `predictFlow` and, whenever the water would run more
+than half a unit from the cursor, `pushPourGhost` drew a second ring at the
+predicted basin — the same colour, the same pulse, brighter than the cursor
+ring because it was tighter — plus a dotted trail leading to it. On any
+sloped ground that fires constantly.
+
+A cursor is a promise about where the thing in your hand will land. Where
+the water runs afterwards is the water's business and the player can watch
+it happen. The rival ring and the trail are gone; `g.dest` and `g.runs` are
+still computed, so anything that wants the prediction can read it.
+
+### 8. `buildMushroom` built the cap in the wrong place, and the collider followed it there
 
 `src/geometry.js`. A `Builder` carries one rotation until something clears
 it. The stem is a `limb`, and `limb` runs along +z, so it is built under
@@ -223,7 +372,7 @@ fully passable on the same reasoning.
 `node tools/check.js` (27 meshes) and `node tools/glsl_lint.js` (34 shaders)
 both pass. Cache key bumped to `v=91`.
 
-### 2. Every camera pan threw, and killed the game (the `state: 'error'` bug)
+### 9. Every camera pan threw, and killed the game (the `state: 'error'` bug)
 
 `src/input.js`, `Rig.update`, the mouse-pan branch.
 
@@ -271,7 +420,7 @@ There is now one predicate — `Input.prototype.panGesture` / `orbitGesture` /
 `camGesture` — and all five callers ask it instead of each re-deriving half
 of it.
 
-### 3. Frame errors kept nothing and stopped nothing
+### 10. Frame errors kept nothing and stopped nothing
 
 `src/main.js`.
 
@@ -289,7 +438,7 @@ terminal on the second occurrence of an identical stack, the second
 `update` throw in a 4 s window, or eight errors of any kind in that window.
 `AF.__loopStrict` rethrows for measurement, `Game.clearErrors()` resumes.
 
-### 4. Ants and creatures walked through stones — the radius was never the one on screen
+### 11. Ants and creatures walked through stones — the radius was never the one on screen
 
 `src/game.js` (`Game.PROP_DRAW`, `propBlockR`, `propAxis`, `resolveProps`),
 `src/renderer.js` (`Batch.meshR`), `src/ants.js`, `src/creatures.js`,
@@ -372,7 +521,7 @@ Colony health is unchanged: 33 ants on day 2 with food rising. (The note
 below about `stickToSurface` records an earlier movement change that took
 population 34 → 3 by day 2; this one does not.)
 
-### 5. Ground now looks wet where the water soaked in
+### 12. Ground now looks wet where the water soaked in
 
 `src/particles.js` (`AF.Wet` + `PS.soakIntoSoil`), `src/shaders.js`
 (`S.WETLIB`, `SOIL_FS`), `src/renderer.js`, `src/gl.js`
@@ -425,7 +574,7 @@ so a tunnel carved through a damp region shows damp walls. It is not saved:
 `save.js` stores no particles, no heap and no soil state, and a loaded
 colony has no water in it either.
 
-### 6. Water halo — gone, and it was the fabricated normals all along
+### 13. Water halo — gone, and it was the fabricated normals all along
 
 `src/water_render.js`.
 
@@ -508,7 +657,7 @@ whole frame: it lifted the *entire sheet of sand*. `tools/shots/H_orig.png`
 against `H_current.png` shows it plainly — same water, same camera, and the
 sand is visibly paler in the first.
 
-### 7. Water looked like a bag of blobs, then like nothing at all
+### 14. Water looked like a bag of blobs, then like nothing at all
 
 `src/water_render.js`, `src/shaders_post.js`, `src/particles.js`.
 
@@ -579,7 +728,7 @@ local distance makes the test scale-free — a silhouette is a step of order
 the size of the thing casting it, a flat surface is a fraction of a percent.
 Grazing ground stops being inked for free.
 
-### 8. A negative `dt` could reach the whole frame body
+### 15. A negative `dt` could reach the whole frame body
 
 `src/main.js`.
 
@@ -600,7 +749,7 @@ non-finite distance sailed through the quiet-enough early-out and into
 `_env` refuses a non-finite envelope rather than taking the frame down over
 a sound effect.
 
-### 9. Dragging the shovel skipped every follow-up
+### 16. Dragging the shovel skipped every follow-up
 
 `src/excavate.js` — `Game.digScoop`, the scoop-merge branch.
 
@@ -622,7 +771,7 @@ single root cause behind three separate reports:
 Fixed by giving the merge branch the same three calls. After: floating
 props in a drag-dug cluster went **11 to 0**.
 
-### 10. Ground did not absorb water; water skated like ice
+### 17. Ground did not absorb water; water skated like ice
 
 `src/particles.js`.
 
@@ -649,7 +798,7 @@ Measured after: 700 poured, curve 700 → 526 → 356 → 165 → 56 → 21 → 
 ~48 s. Smooth, no cliff, drains to nothing. Peak solve 33.8 ms on a
 900-drop stress pour.
 
-### 11. Earlier, in this same area (already shipped)
+### 18. Earlier, in this same area (already shipped)
 
 - particles buried inside solid soil are skipped in `WR.gather()`
 - water colour is premultiplied for the `premul` composite
@@ -736,6 +885,17 @@ drawn radius are equal to three decimals for every kind.
   whole file and turns a three-line patch into a whole-file diff.
 - Watch for apostrophes inside single-quoted GLSL strings when patching
   `src/shaders.js` through a shell heredoc.
+- **Anything standing on the surface wants `farm.surfaceTop`, never
+  `farm.localTop`.** The second is the analytic landscape and does not move
+  when you dig. See fixed 1 — it put every ant in the air over a fresh pit,
+  and the correct version had already existed in `heap.js` for releases.
+- Git on this machine has `core.autocrlf=true`, so a branch checkout hands
+  the working tree CRLF while the index is LF. Python patches written
+  against LF then silently match nothing. Check with
+  `b.count(b'
+')` before a batch of edits and normalise once if needed —
+  writing LF back leaves the content diff empty, so nothing spurious lands
+  in the commit.
 - `tools/glsl_lint.js` covers `src/shaders.js` and `src/shaders_post.js`
   only. The GLSL in `src/water_render.js` is inline and **is not linted** —
   scrutinise it by hand, or it compiles at runtime and fails silently into a

@@ -408,13 +408,31 @@
     return A.C.WORKER;
   };
 
+  //  How much longer brood takes to develop, and how much more often it is
+  //  laid. One number, applied to both, so throughput is untouched.
+  var BROOD_SPREAD = 3.0;
+
   Colony.prototype.layEggs = function (dt, game) {
     var queen = null;
     for (var i = 0; i < this.ants.length; i++) if (this.ants[i].caste === A.C.QUEEN) { queen = this.ants[i]; break; }
     if (!queen) return;
     var nurseryBoost = this.pickChamber(W.CH.NURSERY) ? 1.35 : 1.0;
     this.eggTimer += dt * this.mods.eggRate * nurseryBoost * (this.food() > 10 ? 1 : 0.15) * this.morale;
-    var interval = 5.5 + Math.min(7, this.population() * 0.055);
+    //  A NURSERY HAS TO HAVE BROOD IN IT.
+    //
+    //  An egg used to hatch in about ten seconds and one was laid every six,
+    //  so the standing brood population was 1.5 - measured over 3000 frames,
+    //  never more than 2 at once. All three stages worked perfectly and
+    //  nobody could ever see them, which is the "ants have no larvae"
+    //  report: the chamber is empty almost all of the time.
+    //
+    //  Development and laying are slowed and quickened by the SAME factor,
+    //  so ants per minute, food per egg and every balance number built on
+    //  them are unchanged - what changes is how many are in the pile at any
+    //  moment, which goes up by the same factor. A nursery now holds a
+    //  handful of eggs, larvae and pupae at different stages, which is what
+    //  it is for.
+    var interval = (5.5 + Math.min(7, this.population() * 0.055)) / BROOD_SPREAD;
     while (this.eggTimer > interval) {
       this.eggTimer -= interval;
       if (this.population() + this.brood.length >= this.popCap()) break;
@@ -431,11 +449,24 @@
       var nur = this.pickChamber(W.CH.NURSERY) || this.pickChamber(W.CH.THRONE) || queen.node;
       this.brood.push({
         caste: caste, stage: 0, t: 0,
-        need: def.larvaTime, node: nur,
+        need: def.larvaTime * BROOD_SPREAD, node: nur,
         off: [this.rng.range(-1, 1), this.rng.range(-1, 1)],
-        rot: this.rng.range(0, M.TAU)
+        rot: this.rng.range(0, M.TAU),
+        //  YOU SHOULD SEE HER LAY IT. The egg used to wink into existence
+        //  in the middle of the nursery pile with three sparkles fired at
+        //  the queen, who might be in another chamber entirely - so the one
+        //  moment the colony is actually reproducing was invisible. It is
+        //  born AT her and carried to its place over the next second and a
+        //  half, which is a thing you can watch happen.
+        born: [queen.pos[0], queen.pos[1], queen.pos[2]], bornT: 0
       });
-      if (game && this.isPlayer) game.fx.burst(queen.pos, 3, 'sparkle', [1, 0.9, 0.6]);
+      //  and she takes a beat over it: the renderer reads layT for a crouch
+      queen.layT = 1.0;
+      if (game && this.isPlayer) {
+        //  at the abdomen, not the head
+        game.fx.burst([queen.pos[0] - Math.sin(queen.yaw) * 0.5, queen.pos[1] + 0.1,
+          queen.pos[2] - Math.cos(queen.yaw) * 0.5], 10, 'sparkle', [1, 0.93, 0.72]);
+      }
     }
   };
 
@@ -448,6 +479,7 @@
     for (var i = this.brood.length - 1; i >= 0; i--) {
       var b = this.brood[i];
       b.t += dt * care;
+      if (b.bornT < 1) b.bornT = Math.min(1, b.bornT + dt / 1.5);
       b.stage = b.t < b.need * 0.32 ? 0 : (b.t < b.need * 0.75 ? 1 : 2);
       if (this.hygiene < 0.25 && this.rng.chance(dt * 0.05)) {
         this.brood.splice(i, 1);

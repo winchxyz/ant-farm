@@ -28,6 +28,10 @@
 
   var HP = {};
   var CELL = 0.22;                 // world units per cell
+  //  Biggest ground step one cell may span before the mesh treats it as a
+  //  dug edge rather than a slope. Repose is 0.66*CELL, so this is about
+  //  four times the steepest surface sugar can actually hold.
+  var CLIFF = CELL * 4.0;
   var REPOSE = 0.66;               // tan(33.4 deg) - dry sugar
   //  Wet grains hold a STEEPER wall than dry ones, not a flatter one -
   //  capillary bridges between them add cohesion, which is the entire
@@ -80,16 +84,12 @@
   //  cost; only cells over a hole pay for the descent.
   var GND_STEP = 0.14;
   var GND_MAX = 5.0;
+  //  This used to carry its own copy of the downward march. It lives on Farm
+  //  as surfaceTop now, because ants needed the same answer and were using
+  //  the analytic height instead - two implementations of "where is the
+  //  ground" is exactly how they drift apart.
   function soilTopAt(x, z) {
-    var top = farm.localTop(x, z);
-    if (!farm.soilSDF) return top;
-    if (farm.soilSDF(x, top - 0.02, z) <= 0) return top;
-    for (var d = GND_STEP; d < GND_MAX; d += GND_STEP) {
-      if (farm.soilSDF(x, top - d, z) <= 0) return top - d + GND_STEP * 0.5;
-    }
-    //  Nothing solid within reach - a shaft straight through. Sit on the
-    //  bottom of the search rather than floating at the old surface.
-    return top - GND_MAX;
+    return farm.surfaceTop(x, z);
   }
 
   //  The ground under the heap moves whenever the player digs, so it is
@@ -393,6 +393,25 @@
         var x0 = minX + i * CELL, z0 = minZ + j * CELL;
         var g00 = gnd[j * gx + i], g10 = gnd[j * gx + i + 1];
         var g01 = gnd[(j + 1) * gx + i], g11 = gnd[(j + 1) * gx + i + 1];
+        //  DO NOT BRIDGE A CLIFF.
+        //
+        //  A quad is a patch of ground with sugar lying on it, and its four
+        //  corners sit at gnd + H. Dig the soil out from under one edge of a
+        //  heap and one corner drops several units while its neighbour does
+        //  not - measured on a dug pit, ground 7.24 at one sample and 3.19 at
+        //  the next, 0.22 apart. The quad spanning that is a three-metre
+        //  vertical blade one cell wide, and a heap over a fresh pit came out
+        //  as a crown of white spikes and slivers. That is the "shards fly
+        //  off the sugar" report.
+        //
+        //  There is no such surface. The sugar on the rim and the sugar that
+        //  slumped into the hole are two separate sheets, so the mesh stops
+        //  at the lip of each. A real slope cannot exceed the angle of
+        //  repose over one cell, so anything past a few times that is a hole
+        //  someone dug, not terrain.
+        var gLo = g00 < g10 ? g00 : g10; if (g01 < gLo) gLo = g01; if (g11 < gLo) gLo = g11;
+        var gHi = g00 > g10 ? g00 : g10; if (g01 > gHi) gHi = g01; if (g11 > gHi) gHi = g11;
+        if (gHi - gLo > CLIFF) continue;
         var w00 = W[j * gx + i], w10 = W[j * gx + i + 1];
         var w01 = W[(j + 1) * gx + i], w11 = W[(j + 1) * gx + i + 1];
         vi = corner(vi, x0, g00 + h00, z0, i, j, h00, w00);

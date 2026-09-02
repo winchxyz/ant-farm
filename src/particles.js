@@ -60,7 +60,31 @@
   var MU_SOIL_WATER = 0.38, REST_WATER = 0.02, MASS_WATER = 1.0;
 
   //  soaking - dry soil drinks the water it is touching
-  var SOAK_TIME = 14.0;          // mean seconds of contact before a drop is gone
+  //  SOIL DRINKS UNTIL IT IS FULL, AND THEN STOPS.
+  //
+  //  This used to be the whole model: touch soil for SOAK_TIME seconds and
+  //  vanish, for ever, no matter how much water had already gone into that
+  //  patch of ground. So a pool could never exist. Fill a dug basin to the
+  //  brim, walk away, and forty seconds later the basin is dry - which is
+  //  not what a basin does, and was reported as water constantly soaking
+  //  away when it should not.
+  //
+  //  Real ground has a capacity. The wetness volume added for the damp-patch
+  //  work is exactly that capacity, already indexed by position, already
+  //  filled by this function and already drained by the drying tick - it
+  //  just was not being READ. A drop now only drains where the soil under it
+  //  still has room, so:
+  //
+  //    - the first water into dry ground soaks away, as it should
+  //    - once that patch is saturated the rest of the pool sits on top of it
+  //      and stays until something drinks it or it is bailed out
+  //    - as the drying tick pulls the wetness back down, the pool starts
+  //      seeping again, slowly, from the bottom
+  //
+  //  SOAK_TIME is also longer than it was. Fourteen seconds is a rate you
+  //  notice within one glance at the tank.
+  var SOAK_TIME = 34.0;          // mean seconds of contact before a drop is gone
+  var SOAK_SAT = 0.80;           // soil wetness at which the ground stops drinking
   var SOAK_CONTACT = PR * 1.25;  // how close to the soil counts as touching
 
   // sugar
@@ -900,14 +924,39 @@
   //  asleep almost immediately, and a sleeping puddle is exactly the one
   //  that should be soaking away.
   // ---------------------------------------------------------------
+  //  AMORTISED OVER SOAK_SLICES FRAMES.
+  //
+  //  This walks every live drop and does an SDF lookup with a gradient for
+  //  each one, which was affordable only because water used to drain away
+  //  within a minute and never piled up. Now that soil saturates and a pool
+  //  stays, a tank can hold nine hundred drops indefinitely - measured at
+  //  22.9 ms a frame with 906 of them against 1.9 ms with none, and this
+  //  function is the bulk of it.
+  //
+  //  A drop's soak clock does not need updating sixty times a second. Each
+  //  frame handles one slice of the array and charges it the full elapsed
+  //  time for all the slices, so every drop is still advanced at exactly
+  //  the same rate on average and the drain curve is unchanged - it just
+  //  costs a fraction as much per frame.
+  var SOAK_SLICES = 6;
+  var _soakPhase = 0;
   PS.soakIntoSoil = function (farm, dt) {
     if (!farm || dt <= 0) return 0;
     var gone = 0;
-    for (var i = 0; i < maxIdx; i++) {
+    var phase = _soakPhase; _soakPhase = (_soakPhase + 1) % SOAK_SLICES;
+    dt *= SOAK_SLICES;
+    for (var i = phase; i < maxIdx; i += SOAK_SLICES) {
       if (!alive[i] || mat[i] !== MAT_WATER) continue;
       var d = PS.sdf(farm, px[i], py[i], pz[i], _g);
       if (d < SOAK_CONTACT) {
-        soak[i] += dt;
+        //  How much room is left in the soil right here. At full saturation
+        //  the drop stops draining entirely and simply rests on the ground.
+        var _sd0 = d + WET_BURY;
+        var _qx = px[i] - _g[0] * _sd0, _qy = py[i] - _g[1] * _sd0, _qz = pz[i] - _g[2] * _sd0;
+        var room = 1.0 - Wet.at(farm.wet, _qx, _qy, _qz) / SOAK_SAT;
+        if (room <= 0) { if (soak[i] > 0) soak[i] -= dt * 0.5; continue; }
+        if (room > 1) room = 1;
+        soak[i] += dt * room;
         //  Water lying ON soil dampens it, not only water that finishes
         //  draining. Without this a pool that sits in a pit for a minute and
         //  is then drunk or bailed out leaves the ground bone dry, which is
@@ -921,9 +970,8 @@
         //  the deposit in air the raymarch never visits, and against a
         //  tunnel WALL - where the gradient is horizontal, not vertical -
         //  it would miss the wall completely.
-        var _sd = d + WET_BURY;
-        var _wx = px[i] - _g[0] * _sd, _wy = py[i] - _g[1] * _sd, _wz = pz[i] - _g[2] * _sd;
-        Wet.add(farm.wet, _wx, _wy, _wz, WET_SIT * dt);
+        var _wx = _qx, _wy = _qy, _wz = _qz;
+        Wet.add(farm.wet, _wx, _wy, _wz, WET_SIT * dt * room);
         if (soak[i] >= soakCap[i]) {
           var rx = px[i], ry = py[i], rz = pz[i];
           //  and the rest of the drop goes in where it finally vanished

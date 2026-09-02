@@ -7,3 +7,6 @@ tools/shots/
 Thumbs.db
 desktop.ini
 *.swp
+
+# local editor / harness config (launch.json, worktrees)
+.claude/

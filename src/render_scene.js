@@ -678,30 +678,20 @@
       col[0], col[1], col[2], 0.16 * pulse,
       2, 0, 0.04, 0);
 
-    //  where the water is actually going to end up
-    if (g.trace && g.trace.length >= 6) {
-      var t = g.trace;
-      for (var k = 3; k < t.length; k += 3) {
-        var f = k / t.length;
-        B.ghost.push(t[k], t[k + 1] + 0.05, t[k + 2], 0.085,
-          0, 0, 0, 0, 0, 0, 0, 0,
-          col[0], col[1], col[2],
-          (0.30 + 0.45 * Math.sin(this.time * 6 - k * 0.35)) * (1 - f * 0.4),
-          2, 0, 0.5, 0);
-      }
-    }
-    //  and a clear target ring on the basin when it does not stay put
-    if (g.runs && g.dest) {
-      for (var j = 0; j < 18; j++) {
-        var b = j / 18 * Math.PI * 2;
-        var dx = g.dest[0] + Math.cos(b) * 0.75;
-        var dz = g.dest[2] + Math.sin(b) * 0.75;
-        B.ghost.push(dx, farm.localTop(dx, dz) + 0.05, dz, 0.10,
-          0, 0, 0, 0, 0, 0, 0, 0,
-          col[0], col[1], col[2], 0.85 * pulse,
-          2, 0, 0.5, 0);
-      }
-    }
+    //  THE INDICATOR STAYS UNDER THE CURSOR.
+    //
+    //  There used to be a second, equally bright ring drawn at the basin
+    //  predictFlow said the water would run into, plus a dotted trail
+    //  leading to it. On any sloped ground that fires constantly, so the
+    //  marker the player is aiming with appeared to slide off sideways to
+    //  somewhere they had not pointed at - reported, fairly, as the pour
+    //  indicator drifting and being misleading.
+    //
+    //  A cursor is a promise about where the thing you are holding will
+    //  land. Where the water runs afterwards is the water's business, and
+    //  the player can watch it run. predictFlow is still called and g.dest
+    //  is still set, so anything that wants the prediction can read it -
+    //  nothing draws it as a rival cursor.
   };
 
   //  Shovel preview. Red when the scoop would break into the nest, so the
@@ -807,6 +797,16 @@
       if (!sphereVisible(a.pos, 1.0)) continue;
       casteTint(a.colony, a.caste, _tint);
       var scale = a.def.scale * a.sizeVar;
+      //  THE LAYING BEAT. layT is set to 1 by Colony.layEggs and decays over
+      //  about a second; the queen dips and swells slightly while it runs, so
+      //  the moment an egg appears behind her is something the eye catches
+      //  rather than a silent counter going up.
+      var _lay = a.layT || 0, _layY = 0;
+      if (_lay > 0) {
+        var _lp = Math.sin((1 - _lay) * Math.PI);
+        _layY = -0.10 * _lp * scale;
+        scale *= 1 + 0.06 * _lp;
+      }
       var hp = a.hp / a.maxHp;
       var sel = a.selected ? 1 : 0;
       var glow = a.glow + (a.flash > 0 ? a.flash * 0.85 : 0);
@@ -817,7 +817,7 @@
       else if (a.caste === A.C.ALATE) batch = B.alate;
       else if (a.caste === A.C.SOLDIER || a.caste === A.C.MAJOR) batch = d2 < 26 * 26 ? B.soldier : B.soldierMid;
       else batch = d2 < 15 * 15 ? B.ant : (d2 < 46 * 46 ? B.antMid : B.antLow);
-      if (!batch.push(a.pos[0], a.pos[1], a.pos[2], scale,
+      if (!batch.push(a.pos[0], a.pos[1] + _layY, a.pos[2], scale,
         a.yaw, a.pitch, a.roll, a.phase,
         a.walk, a.attack, a.wing, a.sizeVar,
         _tint[0] + (a.flash > 0 ? a.flash * 0.6 : 0), _tint[1], _tint[2], rough,
@@ -901,6 +901,13 @@
         var rr = n.radius * n.radius;
         if (m2 > rr * 0.92) m2 = rr * 0.92;
         var py = n.pos[1] - Math.sqrt(rr - m2) + 0.06;
+        //  just laid: still on its way from the queen to the pile
+        if (b.bornT !== undefined && b.bornT < 1 && b.born) {
+          var e = b.bornT * b.bornT * (3 - 2 * b.bornT);
+          px = b.born[0] + (px - b.born[0]) * e;
+          py = b.born[1] + (py - b.born[1]) * e;
+          pz = b.born[2] + (pz - b.born[2]) * e;
+        }
         if (!sphereVisible([px, py, pz], 0.6)) continue;
         var t = b.t / b.need;
         B.brood.push(px, py, pz, 0.6 + t * 0.35,

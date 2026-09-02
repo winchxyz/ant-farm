@@ -187,7 +187,8 @@
     UI.hist = { food: { last: 0, rate: 0 }, dirt: { last: 0, rate: 0 }, pop: { last: 0, rate: 0 } };
     UI.initTip();
 
-    UI.attachTip($('sFood'), { title: 'Food', desc: 'Everything your ants eat. Foragers bring it in from the surface; new ants and daily upkeep spend it.' });
+    UI.attachTip($('sFood'), { title: 'Sugar', desc: 'Carbohydrate. Poured in by you, or foraged from the surface. Every new ant is paid for mostly in sugar.' });
+    UI.attachTip($('sProtein'), { title: 'Protein', desc: 'Meat. Butchered from anything the colony kills - a beetle or a spider carcass is stripped and hauled home piece by piece - and spent on brood alongside sugar.' });
     UI.attachTip($('sDirt'), { title: 'Dirt', desc: 'Loose soil. Digging spends it — but excavating a room hands most of it straight back, so you can always keep digging.' });
     UI.attachTip($('sPop'), { title: 'Ants', desc: 'How many ants are alive. More ants means more work done and more food eaten.' });
 
@@ -218,7 +219,7 @@
     //  The three stat chips carried Unicode too - a diamond for food, a
     //  shaded block for dirt, a six-pointed star for ants. Same drawn marks
     //  the tray uses, so the whole screen speaks one language.
-    var chips = { sFood: 'pantry', sDirt: 'shovel', sPop: 'worker' };
+    var chips = { sFood: 'pantry', sProtein: 'pantry', sDirt: 'shovel', sPop: 'worker' };
     Object.keys(chips).forEach(function (id) {
       var host = $(id);
       var slot = host && host.querySelector('.ic');
@@ -565,10 +566,17 @@
     var p = game.player;
     if (!p) return;
 
-    // Food is every edible pooled into one number; Dirt is biomass.
-    var food = p.sugar + p.protein + p.water;
+    //  SUGAR AND PROTEIN ARE SHOWN SEPARATELY.
+    //
+    //  They were summed into one FOOD figure, which told the player nothing:
+    //  a colony drowning in sugar with no meat looked identical to a
+    //  balanced one, and the beetle four soldiers died killing - then
+    //  butchered and carried home piece by piece - moved the same number a
+    //  spoonful of sugar moves. layEggs spends them in a fixed ratio, so
+    //  which one you are short of decides whether the queen can lay at all.
     var pop = p.population();
-    UI.setStat('sFood', food, dtS);
+    UI.setStat('sFood', p.sugar, dtS);
+    UI.setStat('sProtein', p.protein, dtS);
     UI.setStat('sDirt', p.biomass, dtS);
     UI.setStat('sPop', pop, dtS, true);
 
@@ -592,7 +600,7 @@
         c.q.classList.toggle('hidden', q === 0);
         c.q.textContent = q;
         c.have.textContent = p.castes(c.caste);
-        c.e.classList.toggle('poor', food < def.food);
+        c.e.classList.toggle('poor', p.food() < def.food);
       });
     }
 

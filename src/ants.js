@@ -284,7 +284,10 @@
   Ant.prototype.settle = function (dt, lambda) {
     var y = null;
     if (this.mode === 'surface') {
-      y = this.farm.localTop(this.pos[0], this.pos[2]);
+      //  surfaceTop, not localTop: the second is the analytic landscape and
+      //  ignores every scoop, so an ant over a fresh pit walked across the
+      //  air where the ground used to be.
+      y = this.farm.surfaceTop(this.pos[0], this.pos[2]);
     } else if (!this.edge && this.node) {
       y = this.chamberFloor(this.node, this.pos[0], this.pos[2]);
     }
@@ -580,12 +583,15 @@
       f.half[0] - 0.45, f.half[2] - 0.25, wasX, wasZ);
     this.solveD = Math.sqrt((this.pos[0] - _sx) * (this.pos[0] - _sx) +
       (this.pos[2] - _sz) * (this.pos[2] - _sz));
-    var y0 = f.localTop(this.pos[0], this.pos[2]);
+    //  All three are the REAL surface. Riding the analytic one put a walking
+    //  ant over a dug pit into the air, and pitched and rolled it to a slope
+    //  that was not under it either.
+    var y0 = f.surfaceTop(this.pos[0], this.pos[2]);
     this.pos[1] = M.damp(this.pos[1], y0, 22, dt);
     var e = 0.4;
-    var hpx = f.localTop(this.pos[0] + Math.sin(this.yaw) * e, this.pos[2] + Math.cos(this.yaw) * e);
+    var hpx = f.surfaceTop(this.pos[0] + Math.sin(this.yaw) * e, this.pos[2] + Math.cos(this.yaw) * e);
     this.pitch = M.damp(this.pitch, Math.atan2(hpx - y0, e), 8, dt);
-    var hrx = f.localTop(this.pos[0] + Math.cos(this.yaw) * e, this.pos[2] - Math.sin(this.yaw) * e);
+    var hrx = f.surfaceTop(this.pos[0] + Math.cos(this.yaw) * e, this.pos[2] - Math.sin(this.yaw) * e);
     this.roll = M.damp(this.roll, -Math.atan2(hrx - y0, e), 8, dt);
     // arrival is tested AFTER the step, and generously, so wander noise
     // can never leave an ant orbiting its destination forever
@@ -739,6 +745,8 @@
     var gs = game.sim;
     this.age += dt;
     this.flash = Math.max(0, this.flash - dt * 3.5);
+    //  the queen's laying beat, set by Colony.layEggs
+    if (this.layT > 0) this.layT = Math.max(0, this.layT - dt * 1.1);
     this.attack = M.damp(this.attack, this.state === A.ST.FIGHT ? 1 : 0, 8, dt);
     this.attackCd -= dt;
 
