@@ -91,6 +91,32 @@
   };
   R.Batch = Batch;
 
+  //  RESYNC THREE'S STATE CACHE - AND PUT BACK WHAT IT MOVES.
+  //
+  //  three caches blend factors, depth mask, cull face and drawBuffers and
+  //  skips calls it thinks are redundant, so every raw GL call this renderer
+  //  makes leaves that cache lying. resetState() is the documented cure.
+  //
+  //  What the migration brief does not say is that resetState in r180 does
+  //  not only reset the CACHE - it writes GL state to three's own defaults.
+  //  Measured at frameStart: depth mask false -> true, blend dst
+  //  ONE_MINUS_SRC_ALPHA -> ZERO, current program -> null, and
+  //  clear colour (0,0,0,1) -> (0,0,0,0).
+  //
+  //  The clear colour is the one that shows. With three merely adopted and
+  //  drawing nothing, the frame changed by 222,547 pixels of 960,000; pin
+  //  the clear colour around resetState and the difference is exactly zero.
+  //  This renderer sets a clear colour before the scene clear but inherits
+  //  the ambient one elsewhere, so it has always depended on nobody else
+  //  touching it - true until now.
+  //
+  //  Restoring it here rather than at each clear keeps the fix in one place
+  //  and means later stages cannot reintroduce it by adding a resetState.
+  function threeResync() {
+    R.three.resetState();
+    gl.clearColor(0, 0, 0, 1);
+  }
+
   // ==================================================================
   //  INIT
   // ==================================================================
@@ -319,7 +345,7 @@
     //  viewport without restoring it (it survives because the next FBO bind
     //  resets it). Resync three here too, or its cache carries the bake's
     //  framebuffer and viewport into the first pass that goes through it.
-    if (R.three) R.three.resetState();
+    if (R.three) threeResync();
     R.stats.bakeMs = performance.now() - t0;
   };
 
@@ -846,7 +872,7 @@
     //  makes leaves that cache lying, after which three would omit exactly
     //  the call needed to put the state back. Resynchronise once a frame for
     //  the whole duration of the migration.
-    if (R.three) R.three.resetState();
+    if (R.three) threeResync();
     R.stats.draws = 0; R.stats.tris = 0; R.stats.instances = 0;
     for (var k in R.B) R.B[k].begin();
   };

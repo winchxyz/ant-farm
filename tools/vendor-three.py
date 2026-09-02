@@ -1,76 +1,182 @@
+"""Vendor three.js as a CLASSIC script for this repo.
+
+Why this exists
+---------------
+three ships ES modules only from r150 onward, and since r17x the browser build
+is split in two: `three.core.min.js` (self-contained) and `three.module.min.js`
+(imports from core and re-exports it).
+
+This repo has no bundler and index.html loads plain <script> tags in a fixed
+order (THREEJS-MIGRATION.md section 6: "the script load order must not
+change"). A <script type="module"> defers until after parsing, so THREE would
+be undefined when src/gl.js and src/renderer.js run.
+
+The transform is mechanical and asserted at every step:
+
+  * core runs in its own IIFE and hands back a map of its exports
+  * module runs in a second IIFE whose preamble binds the names core exports
+    to the local aliases module's `import {A as e, ...}` gave them
+  * both of module's export blocks become one `window.THREE = {...}`
+
+Two IIFEs rather than one concatenation because both files are minified into
+the same short identifier space (`e`, `t`, `n`, ...) and merging scopes would
+collide silently.
+
+Usage
+-----
+    npm pack three@<version>
+    tar -xzf three-<version>.tgz package/build package/package.json
+    python tools/vendor-three.py <path-to-package-dir> <version>
+"""
+
 import io
+import os
 import re
+import sys
 
-SRC = r"C:\Users\oxman\AppData\Local\Temp\claude\C--Users-oxman-ant-farm\9c6491db-aa76-46bc-99e8-7577594a23c0\scratchpad\package\build\three.module.min.js"
-OUT = r"C:\Users\oxman\ant_farm\vendor\three.classic.js"
+OUT = os.path.join(os.path.dirname(os.path.abspath(__file__)), '..', 'vendor',
+                   'three.classic.js')
 
-s = io.open(SRC, encoding='utf-8', newline='').read()
+# symbols the migration brief actually depends on; a build missing any of
+# these is the wrong build
+REQUIRED = (
+    'WebGLRenderer RawShaderMaterial GLSL3 DepthTexture WebGLRenderTarget '
+    'ExternalTexture CustomBlending OneFactor OneMinusSrcAlphaFactor '
+    'DstColorFactor ZeroFactor AddEquation LessDepth InstancedBufferGeometry '
+    'InstancedBufferAttribute BufferGeometry BufferAttribute DynamicDrawUsage '
+    'FrontSide BackSide DoubleSide HalfFloatType UnsignedByteType FloatType '
+    'DepthFormat RGBAFormat RedFormat LinearFilter NearestFilter '
+    'Vector2 Vector3 Vector4 Matrix4 Scene Mesh OrthographicCamera '
+    'PerspectiveCamera Data3DTexture Texture'
+).split()
 
-# the file is self-contained ESM: no imports, exactly one trailing export block
-assert 'import' not in re.sub(r'\bimportant\b', '', s)[:200] or True
-m = list(re.finditer(r'export\{', s))
-assert len(m) == 1, 'expected exactly one export block, found %d' % len(m)
-start = m[0].start()
-open_brace = m[0].end() - 1
 
-# find the matching close brace for the export list (no nested braces in an export list)
-depth = 0
-end = None
-for i in range(open_brace, len(s)):
-    if s[i] == '{':
-        depth += 1
-    elif s[i] == '}':
-        depth -= 1
-        if depth == 0:
-            end = i
-            break
-assert end is not None, 'unterminated export block'
+def brace_span(s, open_at):
+    """Index of the '}' matching the '{' at open_at."""
+    depth = 0
+    for i in range(open_at, len(s)):
+        if s[i] == '{':
+            depth += 1
+        elif s[i] == '}':
+            depth -= 1
+            if depth == 0:
+                return i
+    raise AssertionError('unbalanced braces')
 
-body = s[:start]
-export_list = s[open_brace + 1:end]
-tail = s[end + 1:].strip()
-assert tail in (';', ''), 'unexpected text after export block: %r' % tail[:80]
 
-pairs = []
-for item in export_list.split(','):
-    item = item.strip()
-    if not item:
-        continue
-    if ' as ' in item:
-        local, exported = item.split(' as ')
-        pairs.append((exported.strip(), local.strip()))
+def parse_specifiers(text):
+    """`A as e, B, C as f` -> [(outer, local), ...]"""
+    out = []
+    for item in text.split(','):
+        item = item.strip()
+        if not item:
+            continue
+        if ' as ' in item:
+            a, b = item.split(' as ')
+            out.append((a.strip(), b.strip()))
+        else:
+            out.append((item, item))
+    return out
+
+
+def take_exports(src, expect):
+    """Strip every top-level `export{...}` (with or without a `from "..."`
+    tail) and return (source, [(name, local, from_module)]).
+
+    three's split build uses all three forms: a plain `export{X as Y}` of its
+    own symbols, and an `export{A,B}from"./three.core.min.js"` that re-exports
+    core without ever binding those names locally. Treating the second as the
+    first leaves the `from"..."` clause dangling and the file will not parse.
+    """
+    triples, spans = [], []
+    for m in re.finditer(r'export\{', src):
+        close = brace_span(src, m.end() - 1)
+        end = close + 1
+        tail = re.match(r'\s*from\s*"[^"]+"\s*', src[end:])
+        reexport = bool(tail)
+        if tail:
+            end += tail.end()
+        if end < len(src) and src[end] == ';':
+            end += 1
+        # export{X as Y} -> Y is the exported name, X the local
+        for local, name in parse_specifiers(src[m.end():close]):
+            triples.append((name, local, reexport))
+        spans.append((m.start(), end))
+    assert len(spans) == expect, 'expected %d export blocks, found %d' % (expect, len(spans))
+    for a, b in reversed(spans):
+        src = src[:a] + src[b:]
+    return src, triples
+
+
+def main():
+    pkg = sys.argv[1] if len(sys.argv) > 1 else 'package'
+    version = sys.argv[2] if len(sys.argv) > 2 else 'unknown'
+    build = os.path.join(pkg, 'build')
+
+    core_path = os.path.join(build, 'three.core.min.js')
+    mod_path = os.path.join(build, 'three.module.min.js')
+    split = os.path.exists(core_path)
+
+    mod = io.open(mod_path, encoding='utf-8', newline='').read()
+
+    if split:
+        core = io.open(core_path, encoding='utf-8', newline='').read()
+        assert 'import{' not in core, 'core is expected to be self-contained'
+        core, core_exports = take_exports(core, 1)
+        core_exports = [(n, l) for n, l, _ in core_exports]
+
+        imports = list(re.finditer(r'import\{', mod))
+        assert len(imports) == 1, 'expected one import in module, found %d' % len(imports)
+        im = imports[0]
+        close = brace_span(mod, im.end() - 1)
+        wanted = parse_specifiers(mod[im.end():close])
+        tail = mod[close + 1:]
+        m2 = re.match(r'\s*from\s*"[^"]+"\s*;?', tail)
+        assert m2, 'unexpected import tail: %r' % tail[:60]
+        mod = mod[:im.start()] + tail[m2.end():]
+
+        core_names = dict(core_exports)
+        missing = [n for n, _ in wanted if n not in core_names]
+        assert not missing, 'module imports names core does not export: %s' % missing[:5]
+
+        mod, mod_exports = take_exports(mod, 2)
+        preamble = ''.join('var %s=__C.%s;' % (local, name) for name, local in wanted)
     else:
-        pairs.append((item, item))
+        assert 'import{' not in mod, 'single-file build should have no imports'
+        core, core_exports, preamble = '', [], ''
+        mod, mod_exports = take_exports(mod, 1)
+        mod_exports = [(n, l, False) for n, l, _ in mod_exports]
 
-assert len(pairs) > 300, 'suspiciously few exports: %d' % len(pairs)
+    names = set(n for n, _, _ in mod_exports)
+    missing = [r for r in REQUIRED if r not in names]
+    assert not missing, 'build is missing required exports: %s' % missing
 
-names = sorted(p[0] for p in pairs)
-for required in ('WebGLRenderer', 'RawShaderMaterial', 'GLSL3', 'DepthTexture',
-                 'WebGLRenderTarget', 'CustomBlending', 'OneFactor',
-                 'OneMinusSrcAlphaFactor', 'DstColorFactor', 'ZeroFactor',
-                 'AddEquation', 'LessDepth', 'InstancedBufferGeometry',
-                 'InstancedBufferAttribute', 'BufferGeometry', 'DynamicDrawUsage',
-                 'FrontSide', 'BackSide', 'DoubleSide', 'HalfFloatType',
-                 'UnsignedByteType', 'FloatType', 'DepthFormat', 'RGBAFormat',
-                 'LinearFilter', 'NearestFilter', 'Vector2', 'Vector3', 'Matrix4'):
-    assert required in names, 'missing export: ' + required
+    parts = [
+        '/* three.js r%s, wrapped as a classic script.\n'
+        '   Generated by tools/vendor-three.py - do not hand-edit.\n'
+        '   See that file for why this repo cannot use the ESM build directly. */\n'
+        '(function () {\n\'use strict\';\n' % version
+    ]
+    if split:
+        parts.append('var __C = (function () {\n')
+        parts.append(core)
+        parts.append('\nreturn {' + ','.join('%s:%s' % (n, l) for n, l in core_exports) + '};\n})();\n')
+    parts.append('var __M = (function (__C) {\n')
+    parts.append(preamble + '\n')
+    parts.append(mod)
+    #  A re-exported name was never bound as a local in module scope - it goes
+    #  straight from core to the outside - so it has to be read off the core
+    #  namespace object rather than from a variable that does not exist.
+    parts.append('\nreturn {' + ','.join(
+        '%s:%s' % (n, ('__C.' + n) if fromcore else l)
+        for n, l, fromcore in mod_exports) + '};\n})(__C);\n')
+    parts.append('window.THREE = __M;\n})();\n')
 
-header = (
-    "/* three.js r%s - UMD-style wrapper generated for this repo.\n"
-    "   Upstream ships ESM only from r150 onward, and this project loads plain\n"
-    "   <script> tags in a fixed order with no bundler (see THREEJS-MIGRATION.md\n"
-    "   section 6: the script load order must not change). A module script would\n"
-    "   defer past src/gl.js and THREE would be undefined when the renderer boots.\n"
-    "   The transform is mechanical: the upstream build has zero imports and one\n"
-    "   trailing export block, which is rewritten as a window.THREE assignment.\n"
-    "   Regenerate with scratchpad/mkthree.py against a fresh npm pack. */\n"
-    "(function () {\n'use strict';\n"
-) % '0.169.0'
+    io.open(OUT, 'w', encoding='utf-8', newline='').write(''.join(parts))
+    print('wrote %s' % os.path.normpath(OUT))
+    print('three r%s, split=%s, core exports %d, THREE exports %d'
+          % (version, split, len(core_exports), len(mod_exports)))
 
-assign = ('\nwindow.THREE = {' +
-          ','.join('%s:%s' % (e, l) for e, l in pairs) +
-          '};\n})();\n')
 
-io.open(OUT, 'w', encoding='utf-8', newline='').write(header + body + assign)
-print('wrote %s' % OUT)
-print('exports: %d' % len(pairs))
+if __name__ == '__main__':
+    main()

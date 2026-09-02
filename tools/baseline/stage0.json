@@ -78,20 +78,29 @@
     "note": "This is also a live bug in its own right: a paused game shimmers. Not fixed here - out of scope for the migration - but worth an entry in BUGS.md."
   },
   "stage1": {
-    "what": "three.js r169 adopted on the existing canvas and context; renders nothing.",
-    "verification": "In-page A/B in one JS task with an identical frozen scene, dof off: with R.three vs R.three=null -> 0 differing pixels. Bit-identical.",
+    "what": "three.js r180 adopted on the existing canvas and context; renders nothing.",
+    "threeRevision": "180",
+    "whyR180": "r169 has no THREE.ExternalTexture, which the brief's Stage 2 needs to let a three material sample the still-raw sceneFB. It lands in r180.",
+    "verification": "Same JS task, identical frozen scene, dof off, R.three present vs null: 0 differing pixels of 960000.",
     "strictRun": {
       "frames": 4000,
       "lastError": null,
-      "errorLog": 0
+      "errorLog": 0,
+      "msPerFrame": 1.55
     },
-    "stats": {
-      "draws": 38,
-      "instances": 666,
-      "tris": 92556,
-      "w": 1200,
-      "h": 800
-    },
-    "threeRevision": "169"
+    "drawingBufferSizeMatchesFormula": true,
+    "shaderPrograms": 24
+  },
+  "resetStateWritesGlState": {
+    "finding": "three.resetState() in r180 does not only reset three's CACHE, it writes GL state to three's defaults. Measured at frameStart: depthMask false->true, blend dst ONE_MINUS_SRC_ALPHA->ZERO, current program->null, clearColor (0,0,0,1)->(0,0,0,0).",
+    "impact": "With three merely adopted and drawing nothing, the frame changed by 222547 pixels of 960000. Pinning the clear colour around resetState brought it to exactly 0.",
+    "cause": "The renderer sets a clear colour before the scene clear but inherits the ambient one elsewhere, so it had always relied on nobody else touching it.",
+    "fix": "renderer.js threeResync() wraps resetState and restores gl.clearColor(0,0,0,1). One place, so a later stage cannot reintroduce it by adding a resetState call.",
+    "briefGap": "THREEJS-MIGRATION.md L14 warns that raw GL desyncs three's cache. The reverse - resetState moving real GL state under the hand-written passes - is not mentioned and is what actually bit."
+  },
+  "statsCaveat": "H.stats() draws/instances/tris scale with how much colony there is, not with the renderer. They ran 38/666/92556 at 4000 frames and 44/714/129646 at 5500. Compare them only at the same simulation age; the bit-identical pixel A/B is the real gate.",
+  "vendoring": {
+    "generator": "tools/vendor-three.py",
+    "note": "r17x+ splits the browser build into three.core.min.js plus three.module.min.js, which imports from core AND re-exports it with an export{...}from\"...\" statement. Both forms have to be handled or the wrapper does not parse."
   }
 }
