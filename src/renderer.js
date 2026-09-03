@@ -1046,6 +1046,54 @@
     R.sceneFB.bind(false);
   };
 
+  //  MIGRATION STAGE 6: glass and the connecting tubes.
+  //
+  //  DoubleSide, never BackSide - GLASS_FS reads gl_FrontFacing to flip the
+  //  normal on back faces, and three implements BackSide as frontFace(CW) +
+  //  cullFace(BACK), which would invert it and light every pane from the
+  //  wrong side (L8).
+  //
+  //  It refracts, so it samples copyFB: the one legal refraction source,
+  //  written once per frame before this pass. Sampling the live scene target
+  //  would be a framebuffer feedback loop and GL would drop the draw with no
+  //  console error beyond a warning (B4, L15).
+  //
+  //  depthWrite is OFF and depthFunc stays LESS. The panes are built +0.10
+  //  outside the soil box precisely because flush panes are coplanar with
+  //  the raymarched soil surface and z-fight across the whole face of the
+  //  tank; LEQUAL would turn that pair into last-drawn-wins (B24).
+  var _glassU = null, _glassMat = null;
+  R.glassMaterial = function (env, cam) {
+    if (!AF.T3B || !AF.T3B.ready) return null;
+    var T = window.THREE;
+    if (!_glassU) _glassU = {
+      uVP: { value: new T.Matrix4() }, uModel: { value: new T.Matrix4() },
+      uScene: { value: null }, uRes: { value: new T.Vector2() },
+      uCamPos: { value: new T.Vector3() }, uSunDir: { value: new T.Vector3() },
+      uSunCol: { value: new T.Vector3() }, uSkyCol: { value: new T.Vector3() },
+      uGndCol: { value: new T.Vector3() }, uGlassCol: { value: new T.Vector3() },
+      uTint: { value: 0.55 }
+    };
+    _glassU.uVP.value.fromArray(cam.vp);
+    _glassU.uScene.value = AF.T3.tex(R.copyFB, 0);
+    _glassU.uRes.value.set(R.width, R.height);
+    _glassU.uCamPos.value.fromArray(cam.pos);
+    _glassU.uSunDir.value.fromArray(env.sunDir);
+    _glassU.uSunCol.value.fromArray(env.sunCol);
+    _glassU.uSkyCol.value.fromArray(env.skyCol);
+    _glassU.uGndCol.value.fromArray(env.gndCol);
+    if (!_glassMat) _glassMat = AF.T3B.material('glass', S.GLASS_VS, S.GLASS_FS, _glassU,
+      { side: THREE.DoubleSide, depthTest: true, depthWrite: false, blend: 'premul' });
+    AF.T3B.setCamera(cam);
+    return _glassMat;
+  };
+  //  Per-draw uniforms, written between draws of the same material.
+  R.glassPer = function (mat, model, tint, col) {
+    mat.uniforms.uModel.value.fromArray(model);
+    mat.uniforms.uTint.value = tint;
+    mat.uniforms.uGlassCol.value.fromArray(col);
+  };
+
   R.useGlass = function (env, cam) {
     var P = R.P.glass;
     P.use();

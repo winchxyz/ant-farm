@@ -27,14 +27,20 @@
     //  are exactly coplanar with the raymarched soil surface, and the two
     //  z-fight across the whole face of the tank - which is the constant
     //  shimmer. Real glass has thickness anyway.
-    this.st.glass = G.buildGlassBox(f0.half[0] + 0.10, f0.half[1] + 0.10, f0.half[2] + 0.10)
-      .build(R.P.glass, null);
+    //  Keep the BUILDER, not just the built mesh: three needs the same
+    //  arrays to make its own geometry from, and buildGlassBox is not free
+    //  enough to call twice.
+    var glassB = G.buildGlassBox(f0.half[0] + 0.10, f0.half[1] + 0.10, f0.half[2] + 0.10);
+    this.st.glass = glassB.build(R.P.glass, null);
+    if (AF.T3B && AF.T3B.ready) this.st.glassGeo = AF.T3B.geoFromBuilder(glassB);
     // one plain table slab under the tank - no shelf, no legs
     this.st.table = G.buildBox(f0.half[0] + 3.0, 0.7, f0.half[2] + 2.4, false).build(P, null);
     //  ...and something to stand the table ON. Without legs the whole
     //  assembly hung in mid-air over a floor 37 units below it.
     this.st.tableLeg = G.buildBox(0.85, TABLE_LEG_H * 0.5, 0.85, false).build(P, null);
-    this.st.tube = G.buildTube(14, 12).build(R.P.glass, null);
+    var tubeB = G.buildTube(14, 12);
+    this.st.tube = tubeB.build(R.P.glass, null);
+    if (AF.T3B && AF.T3B.ready) this.st.tubeGeo = AF.T3B.geoFromBuilder(tubeB);
     this.st.model = m4.create();
   };
 
@@ -310,19 +316,25 @@
 
     // glass needs a copy of what is behind it
     R.copyScene();
-    var GP = R.useGlass(env, cam);
+    var glassMat = (R.glassMaterial && this.st.glassGeo) ? R.glassMaterial(env, cam) : null;
+    var GP = glassMat ? null : R.useGlass(env, cam);
     if (!this.hideGlass) {
       for (i = 0; i < vis.length; i++) {
         m4.identity(this.st.model);
         m4.translate(this.st.model, this.st.model, vis[i].center);
-        GP.m4('uModel', this.st.model);
-        GP.f('uTint', 0.55);
-        GP.v3('uGlassCol', vis[i].biome.glass);
-        this.st.glass.draw();
-        R.stats.draws++;
+        if (glassMat) {
+          R.glassPer(glassMat, this.st.model, 0.55, vis[i].biome.glass);
+          AF.T3B.drawGeo(this.st.glassGeo, glassMat);
+        } else {
+          GP.m4('uModel', this.st.model);
+          GP.f('uTint', 0.55);
+          GP.v3('uGlassCol', vis[i].biome.glass);
+          this.st.glass.draw();
+          R.stats.draws++;
+        }
       }
     }
-    this.drawTubes(env, cam, GP);
+    this.drawTubes(env, cam, GP, glassMat);
     R.drawLiquids(env, cam);
 
     //  Screen-space water. It has to come after copyScene so it can refract
@@ -344,7 +356,7 @@
   // ------------------------------------------------------------------
   //  connection tubes between vitrines
   // ------------------------------------------------------------------
-  Game.drawTubes = function (env, cam, GP) {
+  Game.drawTubes = function (env, cam, GP, glassMat) {
     var mdl = m4.create();
     for (var i = 0; i < this.world.links.length; i++) {
       var L = this.world.links[i];
@@ -366,11 +378,17 @@
       mdl[4] = yx * rad; mdl[5] = yy * rad; mdl[6] = yz * rad; mdl[7] = 0;
       mdl[8] = zx * len; mdl[9] = zy * len; mdl[10] = zz * len; mdl[11] = 0;
       mdl[12] = a[0]; mdl[13] = a[1]; mdl[14] = a[2]; mdl[15] = 1;
-      GP.m4('uModel', mdl);
-      GP.f('uTint', 0.35);
-      GP.v3('uGlassCol', L.edge.build >= 1 ? [0.72, 0.92, 0.86] : [0.95, 0.62, 0.35]);
-      this.st.tube.draw();
-      R.stats.draws++;
+      var tcol = L.edge.build >= 1 ? [0.72, 0.92, 0.86] : [0.95, 0.62, 0.35];
+      if (glassMat && this.st.tubeGeo) {
+        R.glassPer(glassMat, mdl, 0.35, tcol);
+        AF.T3B.drawGeo(this.st.tubeGeo, glassMat);
+      } else {
+        GP.m4('uModel', mdl);
+        GP.f('uTint', 0.35);
+        GP.v3('uGlassCol', tcol);
+        this.st.tube.draw();
+        R.stats.draws++;
+      }
     }
   };
 

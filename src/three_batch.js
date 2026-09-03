@@ -173,6 +173,42 @@
     R.stats.tris += batch.triCount * n;
   };
 
+  //  A plain (non-instanced) geometry from the same builder arrays. Used by
+  //  the static meshes - the room, the tank frames, the glass box, the
+  //  connecting tubes - which carry a real uModel rather than per-instance
+  //  world positions, and so are the only geometry in this renderer that
+  //  could legitimately be frustum culled. It still is not: the object
+  //  matrix lives in a uniform the shader applies itself, so three's bounds
+  //  would be computed in the wrong space.
+  TB.geoFromBuilder = function (builder) {
+    var g = new THREE.BufferGeometry();
+    g.setAttribute('aPos', new THREE.Float32BufferAttribute(new Float32Array(builder.pos), 3));
+    g.setAttribute('aNrm', new THREE.Float32BufferAttribute(new Float32Array(builder.nrm), 3));
+    g.setAttribute('aUV', new THREE.Float32BufferAttribute(new Float32Array(builder.uv), 2));
+    g.setAttribute('aPart', new THREE.Float32BufferAttribute(new Float32Array(builder.part), 4));
+    var idx = builder.pos.length / 3 > 65535
+      ? new Uint32Array(builder.idx) : new Uint16Array(builder.idx);
+    g.setIndex(new THREE.BufferAttribute(idx, 1));
+    g.boundingSphere = new THREE.Sphere(new THREE.Vector3(), Infinity);
+    g.triCount = builder.idx.length / 3;
+    return g;
+  };
+
+  //  Draw a bare geometry with a material, reusing one scratch Mesh. The
+  //  caller has already written whatever per-draw uniforms it needs.
+  var _scratch = null;
+  TB.drawGeo = function (geo, material) {
+    if (!_scratch) {
+      _scratch = new THREE.Mesh(geo, material);
+      _scratch.frustumCulled = false;
+      _scratch.matrixAutoUpdate = false;
+      _scratch.matrixWorld.identity();
+    }
+    _scratch.geometry = geo;
+    _scratch.material = material;
+    TB.drawObject(_scratch);
+  };
+
   //  Draw one prepared THREE.Mesh into whatever target is currently bound.
   //  Deliberately does NOT call setRenderTarget: the scene passes run inside
   //  a framebuffer the raw code bound, and taking ownership of the target
@@ -180,9 +216,40 @@
   //  every later raw pass to the screen - which is exactly what the sky
   //  pass did before it was made to rebind.
   TB.drawObject = function (mesh) {
+    //  RESYNC FIRST. Same lesson as T3.Pass, and it bites harder here.
+    //
+    //  three skips any state call it believes is redundant, so a raw GL
+    //  write between two three draws leaves the cache lying. copyScene()
+    //  runs GLX.depth(false,false) immediately before the glass pass; three
+    //  still had depth test recorded as ENABLED, so when the glass material
+    //  asked for depthTest true three judged the enable redundant and never
+    //  issued it. The glass then drew with no depth test at all and painted
+    //  a milky pane over the whole tank - 477,866 differing pixels.
+    //
+    //  Read at the draw call itself, not after it: a post-hoc snapshot shows
+    //  three's end-of-render epilogue, not the state the draw actually used.
+    //  Hooking gl.drawElements is what made it visible.
+    //
+    //  The batches got away without this only by luck - the raw pass before
+    //  them happened to leave depth test on, which is what they wanted.
+    if (R.threeResync) R.threeResync();
+    //  AND NAME THE TARGET. resetState() unbinds the render target - three
+    //  goes back to the default framebuffer - so after a resync the ambient
+    //  binding the raw code left is gone. Relying on it drew the glass into
+    //  the BACK buffer, where the post chain then overwrote it: the frame
+    //  looked almost right because glass is subtle, while attachment 1 was
+    //  never written at all and SSAO went with it. DRAW_BUFFER0 read BACK
+    //  instead of COLOR_ATTACHMENT0 at the draw call, which is the tell.
+    //
+    //  Bind it explicitly, then hand the raw path its own binding back -
+    //  every pass after this one assumes sceneFB is current and binds
+    //  nothing itself.
+    var three = R.three, target = R.sceneFB && R.sceneFB.rt;
+    if (target) three.setRenderTarget(target);
     scene.children.length = 0;
     scene.add(mesh);
-    R.three.render(scene, camera);
+    three.render(scene, camera);
+    if (target) { three.setRenderTarget(null); R.sceneFB.bind(false); }
     R.stats.draws++;
   };
 

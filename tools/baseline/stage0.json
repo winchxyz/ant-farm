@@ -270,12 +270,12 @@
   "stage6_progress": {
     "done": [
       "sky",
-      "heap"
+      "heap",
+      "glass",
+      "tubes"
     ],
     "remaining": [
       "statics",
-      "glass",
-      "tubes",
       "soil"
     ]
   },
@@ -283,5 +283,18 @@
     "what": "The sugar heap draws through three. Its interleaved 32-byte VBO maps onto THREE.InterleavedBuffer exactly, so m.vtx is handed over as-is rather than deinterleaved.",
     "abVsRawPath": "2 px against a 3 px control, with 960 units of sugar on screen - below the noise floor.",
     "note": "T3B.drawObject deliberately does NOT call setRenderTarget: scene passes run inside a framebuffer the raw code bound, and taking ownership would restore the default framebuffer on the way out - the bug the sky pass hit."
+  },
+  "stage6_glass_tubes": {
+    "what": "Glass panes and the connecting tubes on three - one program, per-draw uModel/uTint/uGlassCol.",
+    "abVsRawPath": "0 differing pixels against a 0 px control. Attachment 1 byte-identical.",
+    "sideMode": "DoubleSide - GLASS_FS reads gl_FrontFacing (L8).",
+    "depth": "depthWrite off, depthFunc LESS. Panes sit +0.10 outside the soil box because flush panes z-fight with the raymarched surface; LEQUAL would make that pair last-drawn-wins (B24)."
+  },
+  "correction_resetState_unbinds_the_target": {
+    "finding": "three's resetState() unbinds the render target - it returns to the default framebuffer. So a resync makes the ambient binding the raw code left disappear, and any three draw that relied on it silently goes to the BACK buffer.",
+    "symptom": "The glass drew into the back buffer, where the post chain then overwrote it. The frame looked almost right because glass is subtle. Attachment 1 was never written at all, so SSAO changed across the whole tank: 1,832,362 differing bytes, mean delta 104.",
+    "tell": "DRAW_BUFFER0 read BACK instead of COLOR_ATTACHMENT0 at the draw call.",
+    "howToRead": "Hook gl.drawElements and snapshot there. A post-hoc read after the draw shows three's end-of-render epilogue, not the state the draw used - it reported depthTest false when the draw had used true.",
+    "fix": "T3B.drawObject binds sceneFB explicitly, renders, then hands the raw path its binding back."
   }
 }
