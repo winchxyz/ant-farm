@@ -358,5 +358,38 @@
       "whatMatters": "three 15,615 px / 138.94 vs raw 16,309 px / 141.00 on the identical scene, three marginally better. The halo magnitude is a property of the scene, not of the port.",
       "lesson": "Quote a halo number with its footprint, or it means nothing."
     }
+  },
+  "stage5_billboards_RESOLVED": {
+    "wasHeldBack": "20 of 49 particles drawn brighter through three, 0 through raw - systematic, unexplained, so it shipped disabled.",
+    "cause": "NOT in the billboard code. T3B.drawObject relied on whatever framebuffer the raw path had left bound, and three's resetState unbinds the render target - the sprites were going to the back buffer. The glass pass turned the same fault up a stage later.",
+    "reMeasured": "particle system frozen so both paths draw the same sprites: 211 particles on screen, 0 brighter through three, 0 through raw. Attachment 1 byte-identical.",
+    "nowEnabled": true
+  },
+  "stage8": {
+    "portedLast": [
+      "copyScene",
+      "shadow pass",
+      "decal/ghost dead prologue removed"
+    ],
+    "rawProgramsPerFrame": 0,
+    "programsRemaining": [
+      "bake"
+    ],
+    "programsDeleted": 23,
+    "whyBakeStays": "It renders into individual LAYERS of a 3D texture through gl.framebufferTextureLayer on an attachment-less FBO, which is not a shape three's render targets express. The brief keeps GLX.texture3D for exactly this. It runs on dig, not per frame.",
+    "provenUnreachable": "The 23 fallback branches were proven dead by DELETING their programs first and running 4,430 strict frames over dig, pour, particles, build ghost, creatures and selection - zero errors. Code that would throw if reached, never reached.",
+    "deadCodeRemoved": "the composite+FXAA raw tail of R.post; the rest of the fallback branches remain as unreachable else-if arms and are listed below",
+    "deadCodeRemaining": "25 R.P.* references across renderer.js, water_render.js, heap_render.js - all in branches guarded by a three path that returns first, all referencing programs that no longer exist",
+    "contextLossGate": {
+      "method": "WEBGL_lose_context.loseContext()",
+      "result": "GLX.contextLost true, boot overlay visible, message 'The graphics context was lost. Reload the page to carry on.' - not a silently blank canvas",
+      "passes": true
+    },
+    "checklist": {
+      "strictFrames": 4430,
+      "lastError": null,
+      "errorLog": 0,
+      "glGetError": 0
+    }
   }
 }

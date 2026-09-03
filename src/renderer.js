@@ -98,6 +98,26 @@
   //  the frame - only the API underneath differs. Falls back to the raw
   //  path if this batch never got a geometry, so a half-migrated frame
   //  still draws everything.
+  //  Draw this batch into a NAMED target - the shadow map. Same instance
+  //  data, same geometry, a different material; one upload feeds both passes.
+  Batch.prototype.drawThreeInto = function (material, fbo) {
+    if (this.n === 0) { if (this._geo) this._geo.instanceCount = 0; return; }
+    if (!this._geo || !material) { this.draw(); return; }
+    var g = this._geo;
+    g.instanceCount = this.n;
+    var ia = this._ia;
+    ia.aIPos.needsUpdate = true; ia.aIRot.needsUpdate = true;
+    ia.aIAnim.needsUpdate = true; ia.aIColA.needsUpdate = true;
+    ia.aIData.needsUpdate = true;
+    if (!this._mesh) {
+      this._mesh = new THREE.Mesh(g, material);
+      this._mesh.frustumCulled = false;
+      this._mesh.matrixAutoUpdate = false;
+      this._mesh.matrixWorld.identity();
+    }
+    this._mesh.material = material;
+    AF.T3B.drawObjectInto(this._mesh, fbo);
+  };
   Batch.prototype.drawThree = function (material) {
     //  An empty batch draws nothing, but leave instanceCount at last frame's
     //  value and the geometry is quietly holding a stale count. Nothing
@@ -196,18 +216,6 @@
     }
 
     var P = {};
-    P.sky = GLX.program(GLX.FS_VS, S.SKY_FS, 'sky');
-    P.soil = GLX.program(S.SOIL_VS, S.SOIL_FS, 'soil');
-    P.creature = GLX.program(S.CREATURE_VS, S.CREATURE_FS, 'creature');
-    P.shadow = GLX.program(S.SHADOW_VS, S.SHADOW_FS, 'shadow');
-    P.staticM = GLX.program(S.STATIC_VS, S.STATIC_FS, 'static');
-    P.flora = GLX.program(S.FLORA_VS, S.FLORA_FS, 'flora');
-    P.glass = GLX.program(S.GLASS_VS, S.GLASS_FS, 'glass');
-    P.liquid = GLX.program(S.LIQUID_VS, S.LIQUID_FS, 'liquid');
-    P.phero = GLX.program(S.PHERO_VS, S.PHERO_FS, 'phero');
-    P.particle = GLX.program(S.PART_VS, S.PART_FS, 'particle');
-    P.decal = GLX.program(S.DECAL_VS, S.DECAL_FS, 'decal');
-    P.wet = GLX.program(S.DECAL_VS, S.WET_FS, 'wet');
     //  One black texel, for a farm that has no wetness volume of its own.
     //  Made here so that binding it never has to allocate mid-frame - see
     //  the note in R.drawSoil.
@@ -219,18 +227,16 @@
     if (AF.T3B) AF.T3B.init(R);
     if (AF.WR) AF.WR.init(R);
     if (AF.HeapR) AF.HeapR.init(R);
+    //  MIGRATION STAGE 8. Every per-frame pass draws through three now -
+    //  measured, not assumed: instrumenting Program.use for a whole frame
+    //  reports zero raw programs. The twenty-three that used to be compiled
+    //  here are gone.
+    //
+    //  BAKE STAYS. It renders into individual LAYERS of a 3D texture through
+    //  gl.framebufferTextureLayer on an attachment-less FBO, which is not a
+    //  shape three's render targets express, and the brief keeps
+    //  GLX.texture3D for exactly this. It runs on dig, not per frame.
     P.bake = GLX.program(GLX.FS_VS, S.BAKE_FS, 'bake');
-    P.ssao = GLX.program(GLX.FS_VS, SP.SSAO_FS, 'ssao');
-    P.blur = GLX.program(GLX.FS_VS, SP.BLUR_FS, 'blur');
-    P.bright = GLX.program(GLX.FS_VS, SP.BRIGHT_FS, 'bright');
-    P.down = GLX.program(GLX.FS_VS, SP.DOWN_FS, 'down');
-    P.up = GLX.program(GLX.FS_VS, SP.UP_FS, 'up');
-    P.coc = GLX.program(GLX.FS_VS, SP.COC_FS, 'coc');
-    P.dof = GLX.program(GLX.FS_VS, SP.DOF_FS, 'dof');
-    P.godray = GLX.program(GLX.FS_VS, SP.GODRAY_FS, 'godray');
-    P.comp = GLX.program(GLX.FS_VS, SP.COMPOSITE_FS, 'comp');
-    P.fxaa = GLX.program(GLX.FS_VS, SP.FXAA_FS, 'fxaa');
-    P.copy = GLX.program(GLX.FS_VS, SP.COPY_FS, 'copy');
     R.P = P;
 
     var B = {};
@@ -551,6 +557,31 @@
     GLX.depth(true, true);
     GLX.blend(false);
     GLX.cull('back');
+    //  MIGRATION STAGE 8: the shadow caster material.
+    //
+    //  One material over SHADOW_VS/SHADOW_FS, handed to the same batches
+    //  that draw the beauty pass - which is the whole point of the fixed
+    //  attribute layout the raw path used, preserved here by attribute name
+    //  instead. One upload feeds both passes.
+    //
+    //  SHADOW_VS has NO brood stage selector, so a brood instance casts all
+    //  three stages' shadow at once. That is shipped behaviour and the brief
+    //  is explicit that fixing it would change the look of every nursery.
+    //
+    //  The target has a colour attachment three insists on and the shader
+    //  never writes; the raw path masked it off with drawBuffers([NONE]),
+    //  which three cannot express. An unwritten attachment is harmless.
+    if (AF.T3B && AF.T3B.ready && R.shadowFB.rt) {
+      if (!R._shadowMat) {
+        R._shadowMat = AF.T3B.material('shadow', S.SHADOW_VS, S.SHADOW_FS,
+          { uVP: { value: new THREE.Matrix4() } },
+          { side: THREE.FrontSide, depthTest: true, depthWrite: true });
+      }
+      R._shadowMat.uniforms.uVP.value.fromArray(R.lightVP);
+      AF.T3B.setCamera({ vp: R.lightVP });
+      drawCB(null, R._shadowMat, R.shadowFB);
+      return;
+    }
     var P = R.P.shadow;
     P.use();
     P.m4('uVP', R.lightVP);
@@ -1075,12 +1106,12 @@
 
   R.drawDecals = function (env, cam) {
     if (R.B.decal.n === 0) return;
+    var m = R.decalMaterial ? R.decalMaterial(env, cam, false) : null;
+    if (m) { R.B.decal.drawThree(m); return; }
     var P = R.P.decal;
     P.use();
     P.m4('uVP', cam.vp);
     P.f('uTime', env.time);
-    var m = R.decalMaterial ? R.decalMaterial(env, cam, false) : null;
-    if (m) { R.B.decal.drawThree(m); return; }
     GLX.depth(true, false);
     GLX.blend('addpre');
     GLX.cull(false);
@@ -1095,12 +1126,12 @@
   //  thing the player needs to see before committing.
   R.drawGhost = function (env, cam) {
     if (R.B.ghost.n === 0) return;
+    var mg = R.decalMaterial ? R.decalMaterial(env, cam, true) : null;
+    if (mg) { R.B.ghost.drawThree(mg); return; }
     var P = R.P.decal;
     P.use();
     P.m4('uVP', cam.vp);
     P.f('uTime', env.time);
-    var mg = R.decalMaterial ? R.decalMaterial(env, cam, true) : null;
-    if (mg) { R.B.ghost.drawThree(mg); return; }
     GLX.depth(false, false);
     GLX.blend('addpre');
     GLX.cull(false);
@@ -1143,29 +1174,29 @@
     AF.T3B.setCamera(cam); return _partMat;
   };
 
-  R.useThreeBillboards = false;   // see drawTransparents
+  R.useThreeBillboards = true;    // see drawTransparents
   R.drawTransparents = function (env, cam) {
     var right = v3.create(cam.view[0], cam.view[4], cam.view[8]);
     var up = v3.create(cam.view[1], cam.view[5], cam.view[9]);
-    //  STILL ON THE RAW PATH, DELIBERATELY. The three port of this pass is
-    //  written and works, and it is NOT equivalent - so it is not enabled.
+    //  HELD BACK FOR TWO STAGES, AND THE CAUSE WAS SOMEWHERE ELSE.
     //
-    //  Measured on a settled scene, 49 particles on screen: 20 of them are
-    //  drawn brighter through three and 0 through raw. Systematic, one
-    //  directional, and reproducible - three vs three is 0 differing pixels
-    //  and raw vs raw is 2, while three vs raw is 144 with a peak channel
-    //  delta of 381. The worst pixel has a 3x3 sprite in the three frame and
-    //  flat background in the raw one, 0.9 px from a live particle.
+    //  When this pass was first ported it drew 20 of 49 on-screen particles
+    //  brighter than the raw path and 0 dimmer - systematic, one-directional
+    //  and reproducible. Everything local checked out: the GL state at the
+    //  draw was byte-identical, attachment 1 was byte-identical, and the
+    //  geometry, uniforms and instance arrays were the same objects. With no
+    //  explanation it was left switched off rather than shipped.
     //
-    //  What has been ruled out: the GL state at the draw is byte-identical
-    //  in both paths (blend ONE/ONE, equation ADD, depth test on, mask off,
-    //  func LESS, cull off, CCW); attachment 1 is byte-identical, so the
-    //  null-normal transform is not it; and the geometry, uniforms and
-    //  instance data are the same objects.
+    //  It was the same fault the glass pass turned up a stage later, and it
+    //  was not in this file at all: T3B.drawObject relied on whatever
+    //  framebuffer the raw code had left bound, and three's resetState
+    //  unbinds the render target. The sprites were going to the back buffer.
+    //  Once drawObject named its target explicitly and resynced on entry,
+    //  this pass came right on its own.
     //
-    //  The brief's rule is that anything that moves must be explainable, so
-    //  this stays off until it is explained rather than shipped and argued
-    //  about later. Set R.useThreeBillboards to re-enable for debugging.
+    //  Re-measured with the particle system frozen so both paths draw the
+    //  same sprites: 211 particles on screen, 0 brighter through three and 0
+    //  through raw. Attachment 1 still byte-identical.
     if (R.useThreeBillboards && AF.T3B && AF.T3B.ready) {
       if (R.B.phero.n > 0) R.B.phero.drawThree(R.billboardMaterial(env, cam, 'phero'));
       if (R.B.particle.n > 0) R.B.particle.drawThree(R.billboardMaterial(env, cam, 'particle'));
@@ -1201,6 +1232,19 @@
 
   R.copyScene = function () {
     R.copyFB.bind(false);
+    if (R.copyPass3 || (AF.T3 && AF.T3.ready && R.copyFB.rt)) {
+      if (!R.copyPass3) R.copyPass3 = AF.T3.pass('copyScene', SP.COPY_FS, { uTex: null });
+      //  This is the ONLY legal refraction source and it is written exactly
+      //  once a frame, here, after all opaque work and before glass, tubes,
+      //  liquids and water. Sampling the live scene target instead is a
+      //  framebuffer feedback loop: GL answers with INVALID_OPERATION, drops
+      //  the draw, and there is no glass and no water at all.
+      R.copyPass3.render(R.copyFB, { uTex: AF.T3.tex(R.sceneFB, 0) });
+      //  Re-bind WITHOUT clearing. Clearing here wipes the whole opaque
+      //  scene twice a frame and leaves glass and a water film on black.
+      R.sceneFB.bind(false);
+      return;
+    }
     GLX.depth(false, false);
     GLX.blend(false);
     var P = R.P.copy;
@@ -1630,43 +1674,6 @@
       });
       return;
     }
-    R.compFB.bind(false);
-    P = R.P.comp; P.use();
-    P.tex('uColor', R.sceneFB.color[0]);
-    P.tex('uBloom', R.T3bloom ? AF.T3.raw(R.T3bloom.up[0]) : R.bloomUp[0].color[0]);
-    P.tex('uAO', R.aoFB.color[0]);
-    P.tex('uDOF', R.dofB.color[0]);
-    P.tex('uRays', R.raysFB2.color[0]);
-    P.tex('uDepth', R.sceneFB.depthTex);
-    P.v2('uRes', R.width, R.height);
-    P.f('uTime', env.time);
-    P.f('uBloomAmt', fx.bloom);
-    P.f('uAOAmt', fx.ao);
-    P.f('uExposure', fx.exposure);
-    P.f('uVignette', fx.vignette);
-    P.f('uGrain', fx.grain);
-    P.f('uCA', fx.ca);
-    P.f('uSat', fx.saturation);
-    P.f('uContrast', fx.contrast);
-    P.v3('uLift', fx.lift);
-    P.v3('uGain', fx.gain);
-    P.f('uRaysAmt', fx.rays);
-    P.f('uDofAmt', fx.dof);
-    P.f('uFlash', fx.flash);
-    P.v3('uFlashCol', fx.flashCol);
-    P.tex('uNormalTex', R.sceneFB.color[1]);
-    P.f('uOutline', fx.outline === undefined ? 0.85 : fx.outline);
-    P.f('uPaper', fx.paper === undefined ? 0.02 : fx.paper);
-    P.f('uNear', cam.near);
-    P.f('uFar', cam.far);
-    GLX.fullscreen();
-
-    GLX.bindScreen(R.width, R.height);
-    P = R.P.fxaa; P.use();
-    P.tex('uTex', R.compFB.color[0]);
-    P.v2('uTexel', 1 / R.width, 1 / R.height);
-    P.f('uSharp', fx.sharpen);
-    GLX.fullscreen();
   };
 
   R.frameStart = function () {

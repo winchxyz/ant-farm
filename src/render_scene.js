@@ -201,8 +201,18 @@
     // ================= SHADOW =================
     var focus = this.activeFarm ? this.activeFarm.center : [0, 8, 0];
     var srad = this.rig.dist > 62 ? this.world.shelfWidth * 0.78 : 26;
-    R.shadowPass(env, focus, srad, function () {
-      for (var q = 0; q < antBatches.length; q++) B[antBatches[q]].draw();
+    R.shadowPass(env, focus, srad, function (P, shadowMat, fbo) {
+      //  Exactly three caster groups. Adding soil or the room turns the whole
+      //  tank black - the ortho light box is fitted to the ant-scale focus
+      //  radius, not to the room.
+      var q;
+      if (shadowMat) {
+        for (q = 0; q < antBatches.length; q++) B[antBatches[q]].drawThreeInto(shadowMat, fbo);
+        for (q = 0; q < propBatches.length; q++) B[propBatches[q]].drawThreeInto(shadowMat, fbo);
+        for (q = 0; q < floraBatches.length; q++) B[floraBatches[q]].drawThreeInto(shadowMat, fbo);
+        return;
+      }
+      for (q = 0; q < antBatches.length; q++) B[antBatches[q]].draw();
       for (q = 0; q < propBatches.length; q++) B[propBatches[q]].draw();
       for (q = 0; q < floraBatches.length; q++) B[floraBatches[q]].draw();
     });
