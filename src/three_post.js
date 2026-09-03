@@ -201,6 +201,33 @@
 
   T3.pass = function (name, fs, uniforms) { return new Pass(name, fs, uniforms); };
   T3.Pass = Pass;
+  T3.strip = stripVersion;
+
+  //  The four blend modes this renderer actually uses, as three factors.
+  //  None of them is one of three's named constants: AdditiveBlending emits
+  //  SRC_ALPHA,ONE (not ONE,ONE) and MultiplyBlending emits ZERO,SRC_COLOR,
+  //  which drops the dst*(1-srcA) term that is the whole per-pixel-strength
+  //  half of 'multalpha'. Brief L3.
+  T3.applyBlend = function (m, mode) {
+    var T = window.THREE;
+    m.transparent = true;                 // L2 - three ARMs blending on this
+    m.blending = T.CustomBlending;
+    m.blendEquation = T.AddEquation;
+    m.blendEquationAlpha = T.AddEquation;
+    if (mode === 'addpre') {              // gl.js 'addpre' = ONE, ONE
+      m.blendSrc = T.OneFactor; m.blendDst = T.OneFactor;
+      m.blendSrcAlpha = T.OneFactor; m.blendDstAlpha = T.OneFactor;
+    } else if (mode === 'premul') {       // ONE, ONE_MINUS_SRC_ALPHA
+      m.blendSrc = T.OneFactor; m.blendDst = T.OneMinusSrcAlphaFactor;
+      m.blendSrcAlpha = null; m.blendDstAlpha = null;
+    } else if (mode === 'multalpha') {    // DST_COLOR, ONE_MINUS_SRC_ALPHA / ZERO, ONE
+      m.blendSrc = T.DstColorFactor; m.blendDst = T.OneMinusSrcAlphaFactor;
+      m.blendSrcAlpha = T.ZeroFactor; m.blendDstAlpha = T.OneFactor;
+    } else {
+      m.transparent = false; m.blending = T.NoBlending;
+    }
+    return m;
+  };
 
   //  Whatever a pass needs to SAMPLE, as something three can bind.
   //  A target this bridge owns hands over its own three Texture; anything

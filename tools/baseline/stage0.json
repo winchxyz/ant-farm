@@ -148,5 +148,35 @@
     "symptom": "Does not look like a state bug. A raw fbo.bind() sets gl.viewport behind three's back; three's cache still holds the old value, decides its own viewport call is redundant on the next setRenderTarget, and the pass draws into a stale rectangle.",
     "measured": "With god rays skipped, raysFB2.bind() left the viewport at 300x200 and the composite wrote a 300x200 corner of a 1200x800 target - 93.7% of the frame pure black - while sceneFB itself was perfectly full at 1200x800. Localised by reading the bounding box of lit pixels in each target in turn.",
     "fix": "T3 Pass.render resyncs on entry as well as exit."
+  },
+  "stage5_group1_props": {
+    "what": "The seven prop batches draw through three: InstancedBufferGeometry wrapping the SAME five Float32Arrays push() already writes, so no call site changed.",
+    "abVsRawPath": "1 differing pixel out of 921,600, max channel delta 11 - the three path reproduces the raw path.",
+    "gates": {
+      "B26_propBlockR_vs_drawnRadius": "delta 0.000000 for every kind (bigrock 1.246, pebble 0.287, twig 0.214, mushroom 0.075)",
+      "mushroomRFixSpotValues": [
+        0.032,
+        0.056,
+        0.081
+      ],
+      "antsInsideLargestRock_1x": "0 / 4000 frames",
+      "antsInsideLargestRock_8x": "0 / 4000 frames",
+      "B13_instanceCountEqualsN": true,
+      "B13_noBatchDrawnAtCapacity": true
+    },
+    "strictRun": {
+      "frames": 4000,
+      "lastError": null,
+      "errorLog": 0,
+      "msPerFrame": 1.09
+    },
+    "remainingGroups": [
+      "ants+brood+bestiary",
+      "flora",
+      "decal+ghost",
+      "phero+particle",
+      "liquids",
+      "wet"
+    ]
   }
 }

@@ -252,7 +252,15 @@
     B.woodlouse.draw(); B.cricket.draw(); B.beetle.draw(); B.centipede.draw();
     P.f('uIsAnt', 0);
     B.brood.draw();
-    for (i = 0; i < propBatches.length; i++) B[propBatches[i]].draw();
+    //  MIGRATION STAGE 5, group 1. The props draw through three from here;
+    //  ants, the bestiary and brood are still raw above. Both write the same
+    //  MRT pair with the same depth state, so they interleave in one pass.
+    var propMat = R.propMaterial ? R.propMaterial(env, cam) : null;
+    if (propMat) {
+      for (i = 0; i < propBatches.length; i++) B[propBatches[i]].drawThree(propMat);
+    } else {
+      for (i = 0; i < propBatches.length; i++) B[propBatches[i]].draw();
+    }
 
     // flora
     R.useFlora(env, cam);

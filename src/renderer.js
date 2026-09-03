@@ -59,6 +59,11 @@
       { name: 'aIData', size: 4, data: this.iData, divisor: 1, dynamic: true }
     ]);
     this.triCount = this.mesh.triCount;
+    //  MIGRATION STAGE 5. A second body over the same five typed arrays, so
+    //  push() and the 41 unlabelled call sites behind it never learn which
+    //  path draws. Both are built; drawThree() picks.
+    this._builder = builder;
+    if (AF.T3B && AF.T3B.ready) this._geo = AF.T3B.geometry(this, builder);
   }
   Batch.prototype.begin = function () { this.n = 0; };
   Batch.prototype.push = function (px, py, pz, scale, yaw, pitch, roll, phase,
@@ -88,6 +93,15 @@
     R.stats.draws++;
     R.stats.instances += this.n;
     R.stats.tris += this.triCount * this.n;
+  };
+  //  The three-backed draw. Same instance count, same stats, same place in
+  //  the frame - only the API underneath differs. Falls back to the raw
+  //  path if this batch never got a geometry, so a half-migrated frame
+  //  still draws everything.
+  Batch.prototype.drawThree = function (material) {
+    if (this.n === 0) return;
+    if (!this._geo || !material) { this.draw(); return; }
+    AF.T3B.draw(this, material);
   };
   R.Batch = Batch;
 
@@ -199,6 +213,7 @@
       internalFormat: gl.R8, format: gl.RED, type: gl.UNSIGNED_BYTE
     });
     if (AF.T3) AF.T3.init(R);
+    if (AF.T3B) AF.T3B.init(R);
     if (AF.WR) AF.WR.init(R);
     if (AF.HeapR) AF.HeapR.init(R);
     P.bake = GLX.program(GLX.FS_VS, S.BAKE_FS, 'bake');
@@ -625,6 +640,73 @@
     GLX.cull('back');
     return P;
   };
+  //  MIGRATION STAGE 5, group 1: the seven prop batches.
+  //
+  //  Props ride the CREATURE program at uIsAnt 0, the same slot brood uses.
+  //  They survive the brood stage selector only because every prop mesh
+  //  carries aPart.w == 0 and every prop push passes variant 0 - give a prop
+  //  a non-zero either and the whole batch vanishes with no GL error (B16).
+  //  Nothing here touches that; the shader is carried across verbatim.
+  //
+  //  The uniform set is the linked program's own, all fifteen of it, read
+  //  off gl.getActiveUniform rather than guessed from the source - the
+  //  lighting block arrives through a shared chunk and is easy to miss.
+  var _creatureU = null, _propMat = null;
+  function creatureUniforms() {
+    if (_creatureU) return _creatureU;
+    var T = window.THREE;
+    var lp = [], lc = [];
+    for (var i = 0; i < 16; i++) { lp.push(new T.Vector4()); lc.push(new T.Vector4()); }
+    return (_creatureU = {
+      uVP: { value: new T.Matrix4() },
+      uLightVP: { value: new T.Matrix4() },
+      uLightPos: { value: lp },
+      uLightCol: { value: lc },
+      uLightCount: { value: 0 },
+      uSunDir: { value: new T.Vector3() },
+      uSunCol: { value: new T.Vector3() },
+      uSkyCol: { value: new T.Vector3() },
+      uGndCol: { value: new T.Vector3() },
+      uCamPos: { value: new T.Vector3() },
+      uToon: { value: 1 },
+      uTime: { value: 0 },
+      uIsAnt: { value: 0 },
+      uShadowMap: { value: null },
+      uShadowTexel: { value: new T.Vector2() }
+    });
+  }
+  function fillCreatureUniforms(u, env, cam, isAnt) {
+    u.uVP.value.fromArray(cam.vp);
+    u.uLightVP.value.fromArray(R.lightVP);
+    var lp = u.uLightPos.value, lc = u.uLightCol.value;
+    for (var i = 0; i < 16; i++) {
+      lp[i].set(R.lightPos[i * 4], R.lightPos[i * 4 + 1], R.lightPos[i * 4 + 2], R.lightPos[i * 4 + 3]);
+      lc[i].set(R.lightCol[i * 4], R.lightCol[i * 4 + 1], R.lightCol[i * 4 + 2], R.lightCol[i * 4 + 3]);
+    }
+    u.uLightCount.value = R.lightCount;
+    u.uSunDir.value.fromArray(env.sunDir);
+    u.uSunCol.value.fromArray(env.sunCol);
+    u.uSkyCol.value.fromArray(env.skyCol);
+    u.uGndCol.value.fromArray(env.gndCol);
+    u.uCamPos.value.fromArray(cam.pos);
+    u.uToon.value = R.toon === undefined ? 1 : R.toon;
+    u.uTime.value = env.time;
+    u.uIsAnt.value = isAnt;
+    //  the shadow map is still a raw GL texture until Stage 6 moves it
+    u.uShadowMap.value = AF.T3.depth(R.shadowFB);
+    u.uShadowTexel.value.set(1 / R.shadowSize, 1 / R.shadowSize);
+  }
+  R.propMaterial = function (env, cam) {
+    if (!AF.T3B || !AF.T3B.ready) return null;
+    var u = creatureUniforms();
+    fillCreatureUniforms(u, env, cam, 0);
+    if (!_propMat) {
+      _propMat = AF.T3B.material('creature:prop', S.CREATURE_VS, S.CREATURE_FS, u, {});
+    }
+    AF.T3B.setCamera(cam);
+    return _propMat;
+  };
+
   R.useFlora = function (env, cam) {
     var P = R.P.flora;
     P.use();
