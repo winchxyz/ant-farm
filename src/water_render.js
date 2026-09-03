@@ -47,6 +47,7 @@
   //  so a bigger number cannot push the film outward past its own silhouette.
   WR.thickScale = 0.13;           // thickness written per splat; see uScale
   WR.thickK = 2.2;                // thickness multiplier for colour only
+  WR.useThree = true;             // Stage 7 path; see the A/B note in draw()
   var gl = null, GLX = null;
   var P = {}, FB = {};
   var vbo = null, vao = null, data = null, nPart = 0;
@@ -515,6 +516,93 @@
   ].join('\n');
 
   // ---------------------------------------------------------------
+  //  MIGRATION STAGE 7 - the fullscreen half of this module on three
+  // ---------------------------------------------------------------
+  //  The GLSL in this file is NOT covered by tools/glsl_lint.js, so every
+  //  one of these is carried across verbatim and reviewed by hand. A typo
+  //  here does not fail loudly - it fails into a black frame.
+  //
+  //  ivec2 uniforms are passed as plain arrays. three's setValueV2i calls
+  //  gl.uniform2iv with whatever it is given, and a Vector2 is not an
+  //  array-like it accepts.
+  var WP = {};
+  function mkPasses() {
+    if (WP.blur) return;
+    var T3 = AF.T3;
+    WP.blur = T3.pass('wblur', FS_BLUR, {
+      uSrc: null, uDir: [1, 0], uSize: [1, 1],
+      uSigR: 0, uSigD: 0, uKernel: 1, uKernelMax: 6
+    });
+    WP.tblur = T3.pass('wtblur', FS_TBLUR, {
+      uSrc: null, uSurf: null, uDir: [1, 0], uSize: [1, 1],
+      uSigR: 0, uKernel: 1, uKernelMax: 3
+    });
+    WP.nrm = T3.pass('wnrm', FS_NORMAL, {
+      uDepth: null, uInvRes: [1, 1], uTan: [1, 1], uSize: [1, 1]
+    });
+    WP.comp = T3.pass('wcomp', FS_COMP, {
+      uScene: null, uNrmDepth: null, uThick: null, uSurf: null,
+      uInvView: new THREE.Matrix4(), uProj: new THREE.Matrix4(),
+      uCamPos: new THREE.Vector3(), uSunDir: new THREE.Vector3(),
+      uSunCol: new THREE.Vector3(), uSkyCol: new THREE.Vector3(),
+      uGndCol: new THREE.Vector3(), uAbsorb: new THREE.Vector3(),
+      uScatter: new THREE.Vector3(),
+      uInvRes: [1, 1], uTan: [1, 1],
+      uTime: 0, uThickK: 1, uRefr: 1, uToon: 1, uTint: 0.3
+    });
+    //  The composite is NOT an ordinary post pass. It writes gl_FragDepth
+    //  from the reconstructed surface, blends premultiplied into the scene
+    //  target, and writes both MRT outputs. T3.Pass defaults to no depth and
+    //  no blend, which is right for everything else in the post chain and
+    //  wrong for every part of this one.
+    //
+    //  Depth WRITE matters more than it looks: the ink outline is a Sobel
+    //  over depth and normals, so with the write off water can never receive
+    //  an outline at all - in a game drawn in ink that is most of "the water
+    //  looks wrong".
+    var m = WP.comp.material;
+    m.depthTest = true;
+    m.depthWrite = true;
+    m.depthFunc = THREE.LessDepth;
+    AF.T3.applyBlend(m, 'premul');
+    m.side = THREE.DoubleSide;
+  }
+
+  var _iv3 = null;
+  function drawComposite(R, env, cam, tanX, tanY) {
+    var T3 = AF.T3, u = WP.comp.uniforms;
+    u.uScene.value = T3.tex(R.copyFB, 0);
+    u.uNrmDepth.value = T3.tex(FB.nrm);
+    u.uThick.value = T3.tex(FB.thick);
+    u.uSurf.value = T3.tex(FB.depth);
+    u.uInvView.value.fromArray(cam.invView || _invView(cam));
+    u.uProj.value.fromArray(cam.proj);
+    u.uCamPos.value.fromArray(cam.pos);
+    u.uSunDir.value.fromArray(env.sunDir);
+    u.uSunCol.value.fromArray(env.sunCol);
+    u.uSkyCol.value.fromArray(env.skyCol);
+    u.uGndCol.value.fromArray(env.gndCol);
+    //  Beer-Lambert: red goes first, blue survives longest.
+    u.uAbsorb.value.set(2.60, 0.95, 0.42);
+    u.uScatter.value.set(0.22, 0.52, 0.78);
+    u.uInvRes.value = [1 / R.width, 1 / R.height];
+    u.uTan.value = [tanX, tanY];
+    u.uTime.value = env.time;
+    //  Read at DRAW time, never cached into the material at init - BUGS.md
+    //  documents the only trusted water measurement as poking these from
+    //  the console between two reads of the same frame (B35).
+    u.uThickK.value = WR.thickK;
+    u.uTint.value = WR.tint;
+    u.uRefr.value = 1.0;
+    u.uToon.value = env.toon === undefined ? 1 : env.toon;
+    WP.comp.render(R.sceneFB);
+    //  Hand the raw path its binding back: resetState unbinds the target,
+    //  and everything after this assumes sceneFB is still current.
+    R.sceneFB.bind(false);
+    R.stats.draws++;
+  }
+
+  // ---------------------------------------------------------------
   //  setup
   // ---------------------------------------------------------------
   WR.init = function (R) {
@@ -553,11 +641,20 @@
     //  it finds, those steps get drawn in black. The cost is paid back by
     //  running ONE blur iteration with a wider range sigma instead of two.
     var fw = w, fh = h;
-    FB.depth = new GLX.FBO({ width: fw, height: fh, depth: true, color: [F16] });
-    FB.blur = new GLX.FBO({ width: fw, height: fh, color: [F16] });
-    FB.nrm = new GLX.FBO({ width: fw, height: fh, color: [F16] });
-    FB.thick = new GLX.FBO({ width: fw, height: fh, color: [F16] });
-    FB.thick2 = new GLX.FBO({ width: fw, height: fh, color: [F16] });
+    //  MIGRATION STAGE 7. Same adapter as the rest of the renderer, so these
+    //  can be both bound raw by the impostor passes and rendered into by
+    //  three's fullscreen passes. HalfFloat throughout is not optional: the
+    //  thickness target is an ACCUMULATION buffer and an UnsignedByte one
+    //  would clamp the sum at 1.0, which is most of the water's colour (L17).
+    var mk = function (spec) {
+      return (AF.T3 && AF.T3.ready && AF.R && AF.R.useThreeTargets)
+        ? AF.T3.fbo(spec) : new GLX.FBO(spec);
+    };
+    FB.depth = mk({ width: fw, height: fh, depth: true, color: [F16] });
+    FB.blur = mk({ width: fw, height: fh, color: [F16] });
+    FB.nrm = mk({ width: fw, height: fh, color: [F16] });
+    FB.thick = mk({ width: fw, height: fh, color: [F16] });
+    FB.thick2 = mk({ width: fw, height: fh, color: [F16] });
     FB.w = fw; FB.h = fh; FB.srcW = w; FB.srcH = h;
   };
 
@@ -661,7 +758,22 @@
     //  Capped, because a particle right against the glass projects to
     //  hundreds of texels and striding that far turns the filter into noise.
     var kernel = pointScale * ((AF.PS && AF.PS.RAD_WATER) || 0.37);
+    //  A/B switch. The only trusted water measurement in this repo works by
+    //  reading the same frame twice with one thing changed, so the two paths
+    //  have to stay switchable from the console for as long as both exist.
+    var T3 = AF.T3, useT3 = !!(T3 && T3.ready && FB.depth.rt && WR.useThree);
+    if (useT3) mkPasses();
     for (var pass = 0; pass < 1; pass++) {
+      if (useT3) {
+        //  The ping-pong ENDS IN FB.depth. Swapping the last write leaves
+        //  the normals rebuilt from the unsmoothed field and the pool comes
+        //  back cobbled.
+        WP.blur.render(FB.blur, { uSrc: T3.tex(FB.depth), uDir: [1, 0], uSize: [w, h],
+          uSigR: sigR, uSigD: sigD, uKernel: kernel, uKernelMax: 6.0 });
+        WP.blur.render(FB.depth, { uSrc: T3.tex(FB.blur), uDir: [0, 1], uSize: [w, h],
+          uSigR: sigR, uSigD: sigD, uKernel: kernel, uKernelMax: 6.0 });
+        continue;
+      }
       FB.blur.bind(false);
       P.blur.use().tex('uSrc', FB.depth.color[0]);
       gl.uniform2i(P.blur.u['uDir'], 1, 0);
@@ -681,6 +793,19 @@
     //  Runs AFTER the depth blur, because it masks itself against the depth
     //  buffer and wants the smoothed silhouette rather than the raw splats.
     //  Two passes, ping-ponging thick -> thick2 -> thick.
+    if (useT3) {
+      //  and this ping-pong ends in FB.thick, for the same reason
+      WP.tblur.render(FB.thick2, { uSrc: T3.tex(FB.thick), uSurf: T3.tex(FB.depth),
+        uDir: [1, 0], uSize: [w, h], uSigR: sigR,
+        uKernel: kernel * 0.5, uKernelMax: 3.0 });
+      WP.tblur.render(FB.thick, { uSrc: T3.tex(FB.thick2), uSurf: T3.tex(FB.depth),
+        uDir: [0, 1], uSize: [w, h], uSigR: sigR,
+        uKernel: kernel * 0.5, uKernelMax: 3.0 });
+      WP.nrm.render(FB.nrm, { uDepth: T3.tex(FB.depth),
+        uInvRes: [1 / w, 1 / h], uTan: [tanX, tanY], uSize: [w, h] });
+      drawComposite(R, env, cam, tanX, tanY);
+      return;
+    }
     FB.thick2.bind(false);
     P.tblur.use().tex('uSrc', FB.thick.color[0]).tex('uSurf', FB.depth.color[0]);
     gl.uniform2i(P.tblur.u['uDir'], 1, 0);

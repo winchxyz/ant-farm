@@ -315,5 +315,34 @@
       "worstBelow": "-4.819 is an ant below ground, a pathing matter outside this stage and not caused by it - the identical raw-path reading is the proof."
     },
     "cullFlipTestTrap": "avoidSoil pushes the camera back out of the box during rig.update, so a naive test reads side=FrontSide and proves nothing. The rig has to be stubbed for the duration of the render."
+  },
+  "stage7_water_fullscreen": {
+    "what": "The water module's five targets and its four fullscreen passes - bilateral blur, thickness blur, normal rebuild, composite - on three. The two GL_POINTS impostor passes are still raw.",
+    "abVsRawPath": "12 differing pixels against a 6 px control, with the particles frozen so both paths draw identical water.",
+    "gates": {
+      "halo": "738 pale px outside the true particle footprint, energy 4.00 - gate was <=1838 / <=5.95",
+      "thicknessSweep@0.13": "blue shift 0.269, darkening 0.155 - IDENTICAL through three and raw, so the 0.298/0.168 in the brief is a different pool, not a port regression",
+      "inkOutline": "1911 px darkened - water receives an outline, which needs the composite's depth WRITE",
+      "drainToZero": "3 ghost pixels with 0 particles gathered - no puddle left painted on the sand",
+      "liveKnobs": "WR.thickScale still takes effect at draw time (6868 px between 0.055 and 0.24) - B35 holds"
+    },
+    "notes": {
+      "ivec2": "three's setValueV2i calls gl.uniform2iv with whatever it is given and a Vector2 is not an array-like it accepts, so uDir/uSize are passed as plain arrays.",
+      "compositeIsNotAPostPass": "It writes gl_FragDepth, blends premultiplied into the scene target and writes both MRT outputs. T3.Pass defaults to no depth and no blend, all three of which are wrong here.",
+      "pingPongEnds": "depth blur ends in FB.depth, thickness blur ends in FB.thick. Swapping either leaves the normals rebuilt from an unsmoothed field.",
+      "switch": "WR.useThree gates the path so the two stay A/B-able from the console while both exist."
+    }
+  },
+  "stage7_progress": {
+    "done": [
+      "targets",
+      "blur",
+      "thickness blur",
+      "normals",
+      "composite"
+    ],
+    "remaining": [
+      "the two GL_POINTS impostor passes"
+    ]
   }
 }
