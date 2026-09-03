@@ -263,8 +263,13 @@
     }
 
     // flora
-    R.useFlora(env, cam);
-    for (i = 0; i < floraBatches.length; i++) B[floraBatches[i]].draw();
+    var floraMat = R.floraMaterial ? R.floraMaterial(env, cam) : null;
+    if (floraMat) {
+      for (i = 0; i < floraBatches.length; i++) B[floraBatches[i]].drawThree(floraMat);
+    } else {
+      R.useFlora(env, cam);
+      for (i = 0; i < floraBatches.length; i++) B[floraBatches[i]].draw();
+    }
 
     // the sugar heap: one mesh, one silhouette, one ink outline
     if (AF.HeapR) { AF.HeapR.sync(); AF.HeapR.draw(R, env, cam); }

@@ -178,5 +178,27 @@
       "liquids",
       "wet"
     ]
+  },
+  "stage5_group2_flora": {
+    "abVsRawPath": "1 differing pixel out of 921,600, max channel delta 8.",
+    "sideMode": "DoubleSide, never BackSide - FLORA_FS reads gl_FrontFacing and three implements BackSide as frontFace(CW)+cullFace(BACK), which inverts it (L8)."
+  },
+  "stage5_group3_decal_ghost": {
+    "abVsRawPath": "ghost with 27 instances: 0 differing pixels. decal never had instances in test - path shares the material construction, not separately exercised.",
+    "L5_secondOutput": "DECAL_FS given a second output writing vec4(0.0) instead of a drawBuffers mask. Verified directly: attachment 1 is byte-identical with the pass on three vs raw (0 differing bytes of the whole RGBA8 buffer). Under addpre (ONE,ONE) dst+0=dst.",
+    "depthState": "decal testTrue/writeFalse, ghost testFalse/writeFalse - the ghost must show through undug soil (B23)."
+  },
+  "stage5_progress": {
+    "done": [
+      "props",
+      "flora",
+      "decal+ghost"
+    ],
+    "remaining": [
+      "ants+brood+bestiary",
+      "phero+particle",
+      "liquids",
+      "wet"
+    ]
   }
 }

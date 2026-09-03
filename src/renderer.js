@@ -707,6 +707,31 @@
     return _propMat;
   };
 
+  //  MIGRATION STAGE 5, group 2: the four flora batches.
+  //
+  //  Same uniform set as the creature program minus uIsAnt, so it shares the
+  //  factory - three only assigns uniforms the program actually declares, so
+  //  the spare entry is inert.
+  //
+  //  DoubleSide, never BackSide. The raw pass runs GLX.cull(false) because a
+  //  blade of grass is a single sheet and culling loses half of every one.
+  //  three implements BackSide as frontFace(CW) + cullFace(BACK), which
+  //  INVERTS gl_FrontFacing - and FLORA_FS reads it, flipping the normal on
+  //  back faces. BackSide here would light every blade from the wrong side
+  //  (brief L8).
+  var _floraMat = null;
+  R.floraMaterial = function (env, cam) {
+    if (!AF.T3B || !AF.T3B.ready) return null;
+    var u = creatureUniforms();
+    fillCreatureUniforms(u, env, cam, 0);
+    if (!_floraMat) {
+      _floraMat = AF.T3B.material('flora', S.FLORA_VS, S.FLORA_FS, u,
+        { side: THREE.DoubleSide });
+    }
+    AF.T3B.setCamera(cam);
+    return _floraMat;
+  };
+
   R.useFlora = function (env, cam) {
     var P = R.P.flora;
     P.use();
@@ -748,12 +773,57 @@
     gl.drawBuffers([gl.COLOR_ATTACHMENT0, gl.COLOR_ATTACHMENT1]);
   };
 
+  //  MIGRATION STAGE 5, group 3: decals and the build ghost.
+  //
+  //  One program, two materials, differing only in the depth test: a decal
+  //  tests depth so it lies on the ground it is painted over, while the
+  //  ghost does NOT, because a room you have not dug yet is buried in soil
+  //  and has to be visible through it (B23).
+  //
+  //  THE SECOND OUTPUT IS THE INTERESTING PART. The raw pass brackets itself
+  //  in colorOnly()/restoreMRT(), masking attachment 1 off with drawBuffers
+  //  because DECAL_FS declares one output and WebGL2 drops a draw that
+  //  writes fewer outputs than the framebuffer has draw buffers. three has
+  //  no per-draw drawBuffers mask and caches the one it set per framebuffer
+  //  (L5), so instead of fighting it the shader gets a second output that
+  //  writes vec4(0.0). Under 'addpre' - blendFunc(ONE, ONE) - that is
+  //  provably a no-op: dst + 0 = dst. Attachment 1 comes out untouched, the
+  //  mask is unnecessary, and nothing can forget to restore it.
+  function decalFS() {
+    return S.DECAL_FS
+      .replace('out vec4 oColor;',
+        'layout(location=0) out vec4 oColor;\nlayout(location=1) out vec4 oNormal;')
+      .replace(/\}\s*$/, '  oNormal = vec4(0.0);\n}');
+  }
+  var _decalU = null, _decalMat = null, _ghostMat = null;
+  function decalUniforms(env, cam) {
+    var T = window.THREE;
+    if (!_decalU) _decalU = { uVP: { value: new T.Matrix4() }, uTime: { value: 0 } };
+    _decalU.uVP.value.fromArray(cam.vp);
+    _decalU.uTime.value = env.time;
+    return _decalU;
+  }
+  R.decalMaterial = function (env, cam, isGhost) {
+    if (!AF.T3B || !AF.T3B.ready) return null;
+    var u = decalUniforms(env, cam);
+    if (isGhost) {
+      if (!_ghostMat) _ghostMat = AF.T3B.material('decal:ghost', S.DECAL_VS, decalFS(), u,
+        { side: THREE.DoubleSide, depthTest: false, depthWrite: false, blend: 'addpre' });
+      AF.T3B.setCamera(cam); return _ghostMat;
+    }
+    if (!_decalMat) _decalMat = AF.T3B.material('decal', S.DECAL_VS, decalFS(), u,
+      { side: THREE.DoubleSide, depthTest: true, depthWrite: false, blend: 'addpre' });
+    AF.T3B.setCamera(cam); return _decalMat;
+  };
+
   R.drawDecals = function (env, cam) {
     if (R.B.decal.n === 0) return;
     var P = R.P.decal;
     P.use();
     P.m4('uVP', cam.vp);
     P.f('uTime', env.time);
+    var m = R.decalMaterial ? R.decalMaterial(env, cam, false) : null;
+    if (m) { R.B.decal.drawThree(m); return; }
     GLX.depth(true, false);
     GLX.blend('addpre');
     GLX.cull(false);
@@ -772,6 +842,8 @@
     P.use();
     P.m4('uVP', cam.vp);
     P.f('uTime', env.time);
+    var mg = R.decalMaterial ? R.decalMaterial(env, cam, true) : null;
+    if (mg) { R.B.ghost.drawThree(mg); return; }
     GLX.depth(false, false);
     GLX.blend('addpre');
     GLX.cull(false);
