@@ -555,10 +555,51 @@
     drawCB(P);
   };
 
+  //  MIGRATION STAGE 6: the sky.
+  //
+  //  A fullscreen pass that writes BOTH outputs and NEITHER depth. The
+  //  triangle sits at clip z = 0, which is window depth 0.5, so a sky that
+  //  wrote depth would stamp 0.5 across the whole screen and depth-reject
+  //  the room, the table and the far half of every tank. The 1.0 far-plane
+  //  sentinel that SSAO and the ink pass both read would be gone with it
+  //  (B23). T3.Pass is already depthTest false / depthWrite false, which is
+  //  exactly right here.
+  var _skyPass = null;
   R.beginScene = function (env, cam) {
     R.sceneFB.bind(false);
     gl.clearColor(0, 0, 0, 1);
     gl.clear(gl.COLOR_BUFFER_BIT | gl.DEPTH_BUFFER_BIT);
+    if (AF.T3 && AF.T3.ready && R.sceneFB.rt) {
+      var T = window.THREE;
+      if (!_skyPass) _skyPass = AF.T3.pass('sky', S.SKY_FS, {
+        uInvVP: new T.Matrix4(), uCamPos: new T.Vector3(), uSunDir: new T.Vector3(),
+        uSunCol: new T.Vector3(), uRoomA: new T.Vector3(), uRoomB: new T.Vector3(), uTime: 0
+      });
+      var u = _skyPass.uniforms;
+      u.uInvVP.value.fromArray(cam.invVP);
+      u.uCamPos.value.fromArray(cam.pos);
+      u.uSunDir.value.fromArray(env.sunDir);
+      u.uSunCol.value.fromArray(env.sunCol);
+      u.uRoomA.value.fromArray(env.roomA);
+      u.uRoomB.value.fromArray(env.roomB);
+      u.uTime.value = env.time;
+      _skyPass.render(R.sceneFB);
+      R.stats.draws++;
+      //  REBIND. T3.Pass.render restores the default framebuffer when it is
+      //  done, which is right for a post pass and wrong here: every raw
+      //  scene pass after this one assumes sceneFB is still bound and binds
+      //  nothing itself. Without this the whole opaque scene draws into the
+      //  default framebuffer - the frame still looks broadly right, so the
+      //  tell is elsewhere: sceneFB's depth stays empty at 1.0 everywhere,
+      //  and drawTransparents raises INVALID_OPERATION because colorOnly()
+      //  calls drawBuffers([COLOR_ATTACHMENT0]) on the default framebuffer,
+      //  which only accepts BACK or NONE.
+      R.sceneFB.bind(false);
+      GLX.depth(true, true);
+      GLX.blend(false);
+      GLX.cull(false);
+      return;
+    }
     GLX.depth(false, false);
     GLX.blend(false);
     GLX.cull(false);

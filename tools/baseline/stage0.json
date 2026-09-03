@@ -251,5 +251,33 @@
   },
   "ab_method_caveat": {
     "note": "The double-render A/B (render, swap accessor, render, diff) has a noise floor. Two identical renders differ by 0-43 px depending on how much the particle system is emitting. Always measure a control - same path twice - in the same run, and compare group deltas against it rather than against zero."
+  },
+  "stage6_sky": {
+    "what": "The sky fullscreen pass draws through three. Writes both MRT outputs, neither depth.",
+    "gates": {
+      "farPlaneSentinel": "0 pixels near 0.5",
+      "sceneWritesDepth": "921,600 px carry geometry depth, min 0.9797",
+      "glGetError": 0
+    },
+    "bug_found": {
+      "symptom": "GL error 1282 in drawTransparents, and sceneFB's depth buffer entirely 1.0 - nothing writing depth at all.",
+      "cause": "T3.Pass.render restores the default framebuffer when done, which is right for a post pass and wrong for a scene pass: every raw pass after beginScene assumes sceneFB is still bound and binds nothing itself. The whole opaque scene was drawing into the default framebuffer.",
+      "whyItHid": "The frame still looked broadly right. The tells were sceneFB depth staying empty, and colorOnly() calling drawBuffers([COLOR_ATTACHMENT0]) on the default framebuffer, which only accepts BACK or NONE.",
+      "foundBy": "wrapping every R.draw* entry point and checking glGetError plus the depth mask after each",
+      "fix": "R.sceneFB.bind(false) after the sky pass"
+    }
+  },
+  "stage6_progress": {
+    "done": [
+      "sky"
+    ],
+    "remaining": [
+      "statics",
+      "glass",
+      "tubes",
+      "heap",
+      "soil"
+    ],
+    "note": "soil is last by design - gl_FragDepth, two sampler3Ds, the per-frame cull flip and uQuality. The camera-inside-soil gate (B10/L8) is not live until soil moves."
   }
 }
