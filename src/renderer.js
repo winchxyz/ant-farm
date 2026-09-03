@@ -828,7 +828,67 @@
     GLX.cull(false);
     return P;
   };
-  R.drawStatic = function (env, cam, mesh, model, albedo, rough, metal, matType) {
+  //  MIGRATION STAGE 6: the static meshes - the room, the table and its
+  //  legs, the vitrine frames. These are the only geometry here that carries
+  //  a real uModel rather than absolute per-instance world positions, and
+  //  the only geometry that could legitimately be frustum culled. It still
+  //  is not: the object matrix lives in a uniform the shader applies itself,
+  //  so three's bounds would be computed in the wrong space entirely.
+  var _statU = null, _statMat = null;
+  R.staticMaterial = function (env, cam) {
+    if (!AF.T3B || !AF.T3B.ready) return null;
+    var T = window.THREE;
+    if (!_statU) {
+      var lp = [], lc = [];
+      for (var i = 0; i < 16; i++) { lp.push(new T.Vector4()); lc.push(new T.Vector4()); }
+      _statU = {
+        uVP: { value: new T.Matrix4() }, uModel: { value: new T.Matrix4() },
+        uLightVP: { value: new T.Matrix4() },
+        uLightPos: { value: lp }, uLightCol: { value: lc }, uLightCount: { value: 0 },
+        uSunDir: { value: new T.Vector3() }, uSunCol: { value: new T.Vector3() },
+        uSkyCol: { value: new T.Vector3() }, uGndCol: { value: new T.Vector3() },
+        uCamPos: { value: new T.Vector3() }, uToon: { value: 1 },
+        uAlbedo: { value: new T.Vector3() }, uRough: { value: 0.5 },
+        uMetal: { value: 0 }, uMatType: { value: 0 },
+        uShadowMap: { value: null }, uShadowTexel: { value: new T.Vector2() }
+      };
+    }
+    var u = _statU;
+    u.uVP.value.fromArray(cam.vp);
+    u.uLightVP.value.fromArray(R.lightVP);
+    var lp2 = u.uLightPos.value, lc2 = u.uLightCol.value;
+    for (var j = 0; j < 16; j++) {
+      lp2[j].set(R.lightPos[j*4], R.lightPos[j*4+1], R.lightPos[j*4+2], R.lightPos[j*4+3]);
+      lc2[j].set(R.lightCol[j*4], R.lightCol[j*4+1], R.lightCol[j*4+2], R.lightCol[j*4+3]);
+    }
+    u.uLightCount.value = R.lightCount;
+    u.uSunDir.value.fromArray(env.sunDir);
+    u.uSunCol.value.fromArray(env.sunCol);
+    u.uSkyCol.value.fromArray(env.skyCol);
+    u.uGndCol.value.fromArray(env.gndCol);
+    u.uCamPos.value.fromArray(cam.pos);
+    u.uToon.value = R.toon === undefined ? 1 : R.toon;
+    u.uShadowMap.value = AF.T3.depth(R.shadowFB);
+    u.uShadowTexel.value.set(1 / R.shadowSize, 1 / R.shadowSize);
+    if (!_statMat) _statMat = AF.T3B.material('static', S.STATIC_VS, S.STATIC_FS, u,
+      { side: THREE.FrontSide, depthTest: true, depthWrite: true });
+    AF.T3B.setCamera(cam);
+    return _statMat;
+  };
+
+  R.drawStatic = function (env, cam, mesh, geo, model, albedo, rough, metal, matType) {
+    if (geo && AF.T3B && AF.T3B.ready) {
+      var m = R.staticMaterial(env, cam);
+      if (m) {
+        m.uniforms.uModel.value.fromArray(model);
+        m.uniforms.uAlbedo.value.fromArray(albedo);
+        m.uniforms.uRough.value = rough;
+        m.uniforms.uMetal.value = metal;
+        m.uniforms.uMatType.value = matType || 0;
+        AF.T3B.drawGeo(geo, m);
+        return;
+      }
+    }
     var P = R.P.staticM;
     P.use();
     bindEnv(P, env, cam);

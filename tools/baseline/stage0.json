@@ -272,10 +272,10 @@
       "sky",
       "heap",
       "glass",
-      "tubes"
+      "tubes",
+      "statics"
     ],
     "remaining": [
-      "statics",
       "soil"
     ]
   },
@@ -296,5 +296,10 @@
     "tell": "DRAW_BUFFER0 read BACK instead of COLOR_ATTACHMENT0 at the draw call.",
     "howToRead": "Hook gl.drawElements and snapshot there. A post-hoc read after the draw shows three's end-of-render epilogue, not the state the draw used - it reported depthTest false when the draw had used true.",
     "fix": "T3B.drawObject binds sceneFB explicitly, renders, then hands the raw path its binding back."
+  },
+  "stage6_statics": {
+    "what": "Room, table, table legs and vitrine frames on three - the only geometry carrying a real uModel.",
+    "abVsRawPath": "1 differing pixel against a 1 px control.",
+    "note": "frustumCulled stays off even here: the object matrix lives in a uniform the shader applies itself, so three's bounds would be computed in the wrong space."
   }
 }

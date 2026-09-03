@@ -21,8 +21,12 @@
     var world = this.world;
     var f0 = world.farms[0];
     this.st = {};
-    this.st.room = G.buildBox(160, 90, 120, true).build(P, null);
-    this.st.frame = G.buildFrame(f0.half[0] + 0.32, f0.half[1] + 0.32, f0.half[2] + 0.32, 0.34).build(P, null);
+    var roomB = G.buildBox(160, 90, 120, true);
+    this.st.room = roomB.build(P, null);
+    if (AF.T3B && AF.T3B.ready) this.st.roomGeo = AF.T3B.geoFromBuilder(roomB);
+    var frameB = G.buildFrame(f0.half[0] + 0.32, f0.half[1] + 0.32, f0.half[2] + 0.32, 0.34);
+    this.st.frame = frameB.build(P, null);
+    if (AF.T3B && AF.T3B.ready) this.st.frameGeo = AF.T3B.geoFromBuilder(frameB);
     //  The panes must sit OUTSIDE the soil volume. Built flush with it they
     //  are exactly coplanar with the raymarched soil surface, and the two
     //  z-fight across the whole face of the tank - which is the constant
@@ -34,10 +38,14 @@
     this.st.glass = glassB.build(R.P.glass, null);
     if (AF.T3B && AF.T3B.ready) this.st.glassGeo = AF.T3B.geoFromBuilder(glassB);
     // one plain table slab under the tank - no shelf, no legs
-    this.st.table = G.buildBox(f0.half[0] + 3.0, 0.7, f0.half[2] + 2.4, false).build(P, null);
+    var tableB = G.buildBox(f0.half[0] + 3.0, 0.7, f0.half[2] + 2.4, false);
+    this.st.table = tableB.build(P, null);
+    if (AF.T3B && AF.T3B.ready) this.st.tableGeo = AF.T3B.geoFromBuilder(tableB);
     //  ...and something to stand the table ON. Without legs the whole
     //  assembly hung in mid-air over a floor 37 units below it.
-    this.st.tableLeg = G.buildBox(0.85, TABLE_LEG_H * 0.5, 0.85, false).build(P, null);
+    var legB = G.buildBox(0.85, TABLE_LEG_H * 0.5, 0.85, false);
+    this.st.tableLeg = legB.build(P, null);
+    if (AF.T3B && AF.T3B.ready) this.st.tableLegGeo = AF.T3B.geoFromBuilder(legB);
     var tubeB = G.buildTube(14, 12);
     this.st.tube = tubeB.build(R.P.glass, null);
     if (AF.T3B && AF.T3B.ready) this.st.tubeGeo = AF.T3B.geoFromBuilder(tubeB);
@@ -215,12 +223,12 @@
     // room: 90 is its half-height, so shift it so the floor lands on floorY
     m4.identity(this.st.model);
     m4.translate(this.st.model, this.st.model, [0, floorY + 90, -10]);
-    R.drawStatic(env, cam, this.st.room, this.st.model, [0.115, 0.118, 0.132], 0.92, 0, 3);
+    R.drawStatic(env, cam, this.st.room, this.st.roomGeo, this.st.model, [0.115, 0.118, 0.132], 0.92, 0, 3);
 
     // table top
     m4.identity(this.st.model);
     m4.translate(this.st.model, this.st.model, [0, tableCentreY, 0]);
-    R.drawStatic(env, cam, this.st.table, this.st.model, [0.30, 0.225, 0.155], 0.80, 0, 1);
+    R.drawStatic(env, cam, this.st.table, this.st.tableGeo, this.st.model, [0.30, 0.225, 0.155], 0.80, 0, 1);
 
     // four legs, inset from the corners, reaching the floor exactly
     var lx = f0.half[0] + 3.0 - 1.6, lz = f0.half[2] + 2.4 - 1.6;
@@ -229,7 +237,7 @@
         m4.identity(this.st.model);
         m4.translate(this.st.model, this.st.model,
           [sx * lx, tableBottomY - TABLE_LEG_H * 0.5, sz * lz]);
-        R.drawStatic(env, cam, this.st.tableLeg, this.st.model, [0.255, 0.185, 0.125], 0.82, 0, 1);
+        R.drawStatic(env, cam, this.st.tableLeg, this.st.tableLegGeo, this.st.model, [0.255, 0.185, 0.125], 0.82, 0, 1);
       }
     }
 
@@ -242,7 +250,7 @@
       m4.translate(this.st.model, this.st.model, vis[i].center);
       var owner = this.colonyOf(vis[i].owner);
       var fc = owner ? [owner.color[0] * 0.5 + 0.06, owner.color[1] * 0.5 + 0.05, owner.color[2] * 0.5 + 0.05] : [0.14, 0.145, 0.155];
-      R.drawStatic(env, cam, this.st.frame, this.st.model, fc, 0.42, 0.75, 2);
+      R.drawStatic(env, cam, this.st.frame, this.st.frameGeo, this.st.model, fc, 0.42, 0.75, 2);
     }
 
     // creatures
