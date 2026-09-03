@@ -192,13 +192,32 @@
     "done": [
       "props",
       "flora",
-      "decal+ghost"
+      "decal+ghost",
+      "ants+brood+bestiary"
     ],
     "remaining": [
-      "ants+brood+bestiary",
       "phero+particle",
       "liquids",
       "wet"
     ]
+  },
+  "stage5_group4_creatures": {
+    "abVsRawPath": "2 differing pixels of 921,600 with all three uIsAnt groups populated (ants, queen, spider, 5 bestiary species, brood).",
+    "B16_broodSelector": {
+      "matchesRawPath": true,
+      "perStageCoverage": {
+        "egg": 152,
+        "larva": 103,
+        "pupa": 42
+      },
+      "pairwiseDiff": {
+        "eggVsLarva": 50,
+        "larvaVsPupa": 50,
+        "eggVsPupa": 102
+      },
+      "nursery": "tools/shots/s5_nursery.png - 2 eggs and 10 pupae, visibly distinct shapes, not identical beans"
+    },
+    "uniformObjectPerMaterial": "Four materials sharing one uniforms object would share one uIsAnt, which is exactly what separates an ant from a beetle from a brood stage. Keyed cache instead - stamping per group before each draw would appear to work and break the first time anything reordered them.",
+    "instanceCountEqualsN": "all 24 batches, including after a batch empties (drawThree zeroes it on the early return)"
   }
 }

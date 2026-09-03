@@ -240,18 +240,37 @@
     }
 
     // creatures
-    var P = R.useCreature(env, cam, true);
+    //  MIGRATION STAGE 5, group 4. Three uIsAnt groups, three materials,
+    //  the grouping preserved exactly: 2 for real ants and the spider,
+    //  1 for the bestiary, 0 for brood. Regrouping these gives beetles ant
+    //  colouring and breaks the brood stage selector (B16).
+    var antMat = R.creatureMaterial ? R.creatureMaterial(env, cam, 2) : null;
+    var P = antMat ? null : R.useCreature(env, cam, true);
+    if (antMat) {
+      B.ant.drawThree(antMat); B.antMid.drawThree(antMat); B.antLow.drawThree(antMat);
+      B.soldier.drawThree(antMat); B.soldierMid.drawThree(antMat);
+      B.queen.drawThree(antMat); B.alate.drawThree(antMat); B.spider.drawThree(antMat);
+    } else {
     B.ant.draw(); B.antMid.draw(); B.antLow.draw();
     B.soldier.draw(); B.soldierMid.draw();
     B.queen.draw(); B.alate.draw(); B.spider.draw();
+    }
     //  The bestiary. This list is separate from antBatches above, which
     //  only uploads and casts shadows - a batch missing from HERE is
     //  simulated, uploaded, and shadowed, but never actually drawn.
     //  The bestiary keeps the chitin detail but not the ant tagma pattern.
+    if (antMat) {
+      var bestMat = R.creatureMaterial(env, cam, 1);
+      B.woodlouse.drawThree(bestMat); B.cricket.drawThree(bestMat);
+      B.beetle.drawThree(bestMat); B.centipede.drawThree(bestMat);
+      var broodMat = R.creatureMaterial(env, cam, 0);
+      B.brood.drawThree(broodMat);
+    } else {
     P.f('uIsAnt', 1);
     B.woodlouse.draw(); B.cricket.draw(); B.beetle.draw(); B.centipede.draw();
     P.f('uIsAnt', 0);
     B.brood.draw();
+    }
     //  MIGRATION STAGE 5, group 1. The props draw through three from here;
     //  ants, the bestiary and brood are still raw above. Both write the same
     //  MRT pair with the same depth state, so they interleave in one pass.

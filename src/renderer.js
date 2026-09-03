@@ -99,7 +99,10 @@
   //  path if this batch never got a geometry, so a half-migrated frame
   //  still draws everything.
   Batch.prototype.drawThree = function (material) {
-    if (this.n === 0) return;
+    //  An empty batch draws nothing, but leave instanceCount at last frame's
+    //  value and the geometry is quietly holding a stale count. Nothing
+    //  renders it today; that is not a reason to leave a loaded gun in it.
+    if (this.n === 0) { if (this._geo) this._geo.instanceCount = 0; return; }
     if (!this._geo || !material) { this.draw(); return; }
     AF.T3B.draw(this, material);
   };
@@ -624,6 +627,38 @@
     R.stats.draws++;
   };
 
+  //  MIGRATION STAGE 5, group 4: ants, the bestiary and brood.
+  //
+  //  uIsAnt is a tri-state set by DRAW GROUPING, not by anything in the
+  //  instance data: 2 for real ants and the spider, 1 for the bestiary, 0
+  //  for brood and every prop. It does two jobs at once. The tagma tint is
+  //  an ant colour pattern that must not reach a beetle, and the brood stage
+  //  selector keys off it:
+  //
+  //    if(uIsAnt<0.5 && abs(aPart.w-aIAnim.w)>0.5) gl_Position=vec4(2,2,2,1);
+  //
+  //  which is how one brood mesh draws as an egg OR a larva OR a pupa - the
+  //  other two stages are pushed outside the clip volume. Regroup these
+  //  draws and beetles get ant colouring; drop the selector and every
+  //  nursery becomes a row of identical white beans (B16).
+  //
+  //  So this is three materials over one shader, one per uIsAnt value, and
+  //  the grouping is preserved exactly as the raw path had it.
+  var _antMat = null, _bestMat = null, _broodMat = null;
+  R.creatureMaterial = function (env, cam, isAnt) {
+    if (!AF.T3B || !AF.T3B.ready) return null;
+    var key = isAnt === 2 ? 'ant' : (isAnt === 1 ? 'bestiary' : 'brood');
+    var u = creatureUniforms(key);
+    fillCreatureUniforms(u, env, cam, isAnt);
+    var m = isAnt === 2 ? _antMat : (isAnt === 1 ? _bestMat : _broodMat);
+    if (!m) {
+      m = AF.T3B.material('creature:' + key, S.CREATURE_VS, S.CREATURE_FS, u, {});
+      if (isAnt === 2) _antMat = m; else if (isAnt === 1) _bestMat = m; else _broodMat = m;
+    }
+    AF.T3B.setCamera(cam);
+    return m;
+  };
+
   R.useCreature = function (env, cam, isAnt) {
     var P = R.P.creature;
     P.use();
@@ -651,13 +686,21 @@
   //  The uniform set is the linked program's own, all fifteen of it, read
   //  off gl.getActiveUniform rather than guessed from the source - the
   //  lighting block arrives through a shared chunk and is easy to miss.
-  var _creatureU = null, _propMat = null;
-  function creatureUniforms() {
-    if (_creatureU) return _creatureU;
+  //  ONE UNIFORM OBJECT PER MATERIAL, not one shared between them.
+  //
+  //  three reads material.uniforms at draw time, so four materials sharing
+  //  one object share one uIsAnt - and uIsAnt is exactly what separates an
+  //  ant from a beetle from a brood stage. Stamping it per group before each
+  //  draw would appear to work, because the groups are drawn in sequence,
+  //  and would break silently the first time anything reordered or batched
+  //  them. Keyed cache instead.
+  var _creatureU = {}, _propMat = null;
+  function creatureUniforms(key) {
+    if (_creatureU[key]) return _creatureU[key];
     var T = window.THREE;
     var lp = [], lc = [];
     for (var i = 0; i < 16; i++) { lp.push(new T.Vector4()); lc.push(new T.Vector4()); }
-    return (_creatureU = {
+    return (_creatureU[key] = {
       uVP: { value: new T.Matrix4() },
       uLightVP: { value: new T.Matrix4() },
       uLightPos: { value: lp },
@@ -698,7 +741,7 @@
   }
   R.propMaterial = function (env, cam) {
     if (!AF.T3B || !AF.T3B.ready) return null;
-    var u = creatureUniforms();
+    var u = creatureUniforms('prop');
     fillCreatureUniforms(u, env, cam, 0);
     if (!_propMat) {
       _propMat = AF.T3B.material('creature:prop', S.CREATURE_VS, S.CREATURE_FS, u, {});
@@ -722,7 +765,7 @@
   var _floraMat = null;
   R.floraMaterial = function (env, cam) {
     if (!AF.T3B || !AF.T3B.ready) return null;
-    var u = creatureUniforms();
+    var u = creatureUniforms('flora');
     fillCreatureUniforms(u, env, cam, 0);
     if (!_floraMat) {
       _floraMat = AF.T3B.material('flora', S.FLORA_VS, S.FLORA_FS, u,
