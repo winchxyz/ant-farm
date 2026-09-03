@@ -274,8 +274,14 @@
     //  MIGRATION STAGE 5, group 1. The props draw through three from here;
     //  ants, the bestiary and brood are still raw above. Both write the same
     //  MRT pair with the same depth state, so they interleave in one pass.
-    var propMat = R.propMaterial ? R.propMaterial(env, cam) : null;
-    if (propMat) {
+    //  Props share the creature PROGRAM with the ants above, so the choice
+    //  of path is not theirs to make independently: taking the raw branch
+    //  here after the ants took the three branch draws them with whatever
+    //  program happened to be bound last, because nothing called
+    //  R.useCreature to bind one. Measured, that was 41,654 wrong pixels.
+    //  One decision for the whole group.
+    if (antMat) {
+      var propMat = R.propMaterial(env, cam);
       for (i = 0; i < propBatches.length; i++) B[propBatches[i]].drawThree(propMat);
     } else {
       for (i = 0; i < propBatches.length; i++) B[propBatches[i]].draw();

@@ -193,12 +193,17 @@
       "props",
       "flora",
       "decal+ghost",
-      "ants+brood+bestiary"
-    ],
-    "remaining": [
-      "phero+particle",
+      "ants+brood+bestiary",
       "liquids",
-      "wet"
+      "wet(dormant)"
+    ],
+    "held": [
+      "phero+particle"
+    ],
+    "remaining_stages": [
+      6,
+      7,
+      8
     ]
   },
   "stage5_group4_creatures": {
@@ -219,5 +224,32 @@
     },
     "uniformObjectPerMaterial": "Four materials sharing one uniforms object would share one uIsAnt, which is exactly what separates an ant from a beetle from a brood stage. Keyed cache instead - stamping per group before each draw would appear to work and break the first time anything reordered them.",
     "instanceCountEqualsN": "all 24 batches, including after a batch empties (drawThree zeroes it on the early return)"
+  },
+  "stage5_groups_5_6_7": {
+    "liquids": "droplets + puddles on three. LIQUID_FS already declares both outputs so no null-normal transform. 6 px vs a 2 px control.",
+    "wet": "ported with its multalpha blend, left DORMANT as the brief requires. Untested by construction - Game.pushWet returns immediately and there is no way to exercise it without enabling it.",
+    "billboards_HELD_ON_RAW": {
+      "status": "port written, verified NOT equivalent, left disabled behind R.useThreeBillboards",
+      "evidence": {
+        "threeVsThree": "0 px",
+        "rawVsRaw": "2 px",
+        "threeVsRaw": "144 px, max channel delta 381, same in both orders",
+        "perParticle": "49 particles on screen: 20 brighter through three, 0 brighter through raw - systematic and one-directional",
+        "worstPixel": "3x3 sprite present in the three frame, flat background in raw, 0.9 px from a live particle"
+      },
+      "ruledOut": [
+        "GL state at the draw is byte-identical (blend ONE/ONE, eq ADD, depth test on, mask off, func LESS, cull off, CCW)",
+        "attachment 1 byte-identical, so the null-normal transform is not the cause",
+        "geometry, uniforms and instance arrays are the same objects"
+      ]
+    }
+  },
+  "stage5_fallback_bug": {
+    "finding": "Props share the creature PROGRAM with the ants. Letting each group choose its path independently meant the prop raw fallback ran after the ants took the three branch, with no program bound - nothing had called R.useCreature.",
+    "measured": "41,654 wrong pixels, max channel delta 363. Found by bisecting the material accessors one at a time against a control, not by looking at the frame.",
+    "fix": "one path decision for the whole creature-program group"
+  },
+  "ab_method_caveat": {
+    "note": "The double-render A/B (render, swap accessor, render, diff) has a noise floor. Two identical renders differ by 0-43 px depending on how much the particle system is emitting. Always measure a control - same path twice - in the same run, and compare group deltas against it rather than against zero."
   }
 }

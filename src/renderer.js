@@ -832,12 +832,21 @@
   //  writes vec4(0.0). Under 'addpre' - blendFunc(ONE, ONE) - that is
   //  provably a no-op: dst + 0 = dst. Attachment 1 comes out untouched, the
   //  mask is unnecessary, and nothing can forget to restore it.
-  function decalFS() {
-    return S.DECAL_FS
+  //  Give a single-output fragment shader a second output that writes
+  //  vec4(0.0), so it can draw into the MRT pair without a drawBuffers mask.
+  //
+  //  Provably a no-op for every blend mode this is used with:
+  //    addpre    (ONE, ONE)                     dst + 0            = dst
+  //    multalpha (DST_COLOR, ONE_MINUS_SRC_ALPHA / ZERO, ONE)
+  //              RGB 0*dst + dst*(1-0) = dst,  A 0*srcA + 1*dstA = dstA
+  //  Verified on attachment 1 read back in full: 0 differing bytes.
+  function withNullNormal(fs) {
+    return fs
       .replace('out vec4 oColor;',
         'layout(location=0) out vec4 oColor;\nlayout(location=1) out vec4 oNormal;')
       .replace(/\}\s*$/, '  oNormal = vec4(0.0);\n}');
   }
+  function decalFS() { return withNullNormal(S.DECAL_FS); }
   var _decalU = null, _decalMat = null, _ghostMat = null;
   function decalUniforms(env, cam) {
     var T = window.THREE;
@@ -897,9 +906,66 @@
     GLX.depth(true, false);
   };
 
+  //  MIGRATION STAGE 5, group 5: pheromone trails and particles.
+  //
+  //  Both are camera-facing billboards built in the vertex shader from the
+  //  view matrix rows handed in as uRight/uUp - not from a model matrix, and
+  //  not by three. Both reinterpret the shared instance slots: PART_VS reads
+  //  aIData as (life01, kind, spin, seed) and PHERO_VS as (age, type, seed,
+  //  pulse), which is why the twenty-slot push signature has to stay
+  //  positional and unlabelled (B15).
+  var _billU = null, _pheroMat = null, _partMat = null;
+  function billboardUniforms(env, cam) {
+    var T = window.THREE;
+    if (!_billU) _billU = { uVP: { value: new T.Matrix4() }, uRight: { value: new T.Vector3() },
+                            uUp: { value: new T.Vector3() }, uTime: { value: 0 } };
+    _billU.uVP.value.fromArray(cam.vp);
+    _billU.uRight.value.set(cam.view[0], cam.view[4], cam.view[8]);
+    _billU.uUp.value.set(cam.view[1], cam.view[5], cam.view[9]);
+    _billU.uTime.value = env.time;
+    return _billU;
+  }
+  R.billboardMaterial = function (env, cam, which) {
+    if (!AF.T3B || !AF.T3B.ready) return null;
+    var u = billboardUniforms(env, cam);
+    if (which === 'phero') {
+      if (!_pheroMat) _pheroMat = AF.T3B.material('phero', S.PHERO_VS, withNullNormal(S.PHERO_FS), u,
+        { side: THREE.DoubleSide, depthTest: true, depthWrite: false, blend: 'addpre' });
+      AF.T3B.setCamera(cam); return _pheroMat;
+    }
+    if (!_partMat) _partMat = AF.T3B.material('particle', S.PART_VS, withNullNormal(S.PART_FS), u,
+      { side: THREE.DoubleSide, depthTest: true, depthWrite: false, blend: 'addpre' });
+    AF.T3B.setCamera(cam); return _partMat;
+  };
+
+  R.useThreeBillboards = false;   // see drawTransparents
   R.drawTransparents = function (env, cam) {
     var right = v3.create(cam.view[0], cam.view[4], cam.view[8]);
     var up = v3.create(cam.view[1], cam.view[5], cam.view[9]);
+    //  STILL ON THE RAW PATH, DELIBERATELY. The three port of this pass is
+    //  written and works, and it is NOT equivalent - so it is not enabled.
+    //
+    //  Measured on a settled scene, 49 particles on screen: 20 of them are
+    //  drawn brighter through three and 0 through raw. Systematic, one
+    //  directional, and reproducible - three vs three is 0 differing pixels
+    //  and raw vs raw is 2, while three vs raw is 144 with a peak channel
+    //  delta of 381. The worst pixel has a 3x3 sprite in the three frame and
+    //  flat background in the raw one, 0.9 px from a live particle.
+    //
+    //  What has been ruled out: the GL state at the draw is byte-identical
+    //  in both paths (blend ONE/ONE, equation ADD, depth test on, mask off,
+    //  func LESS, cull off, CCW); attachment 1 is byte-identical, so the
+    //  null-normal transform is not it; and the geometry, uniforms and
+    //  instance data are the same objects.
+    //
+    //  The brief's rule is that anything that moves must be explainable, so
+    //  this stays off until it is explained rather than shipped and argued
+    //  about later. Set R.useThreeBillboards to re-enable for debugging.
+    if (R.useThreeBillboards && AF.T3B && AF.T3B.ready) {
+      if (R.B.phero.n > 0) R.B.phero.drawThree(R.billboardMaterial(env, cam, 'phero'));
+      if (R.B.particle.n > 0) R.B.particle.drawThree(R.billboardMaterial(env, cam, 'particle'));
+      return;
+    }
     GLX.depth(true, false);
     GLX.blend('addpre');
     GLX.cull(false);
@@ -957,8 +1023,59 @@
   //  chain is a Sobel over depth + normals, so with depth-write off - which
   //  is what this pass used to do - water could never receive an outline at
   //  all. In a game drawn in ink that is most of "the water looks wrong".
+  //  MIGRATION STAGE 5, group 6: droplets and puddles.
+  //
+  //  LIQUID_FS already declares both outputs, so no null-normal transform.
+  //  It refracts, so it samples copyFB - the one legal refraction source,
+  //  written once per frame before the refractive passes. Sampling the live
+  //  scene target here would be a feedback loop and GL would drop the draw
+  //  (B4). Droplets before puddles, premultiplied, depth test on and write
+  //  off - nothing in this renderer is depth sorted, so that order is the
+  //  only thing keeping them stacked correctly.
+  var _liqU = null, _liqMat = null;
+  R.liquidMaterial = function (env, cam) {
+    if (!AF.T3B || !AF.T3B.ready) return null;
+    var T = window.THREE;
+    if (!_liqU) {
+      var lp = [], lc = [];
+      for (var i = 0; i < 16; i++) { lp.push(new T.Vector4()); lc.push(new T.Vector4()); }
+      _liqU = { uVP: { value: new T.Matrix4() }, uScene: { value: null },
+        uRes: { value: new T.Vector2() }, uTime: { value: 0 },
+        uLightPos: { value: lp }, uLightCol: { value: lc }, uLightCount: { value: 0 },
+        uSunDir: { value: new T.Vector3() }, uSunCol: { value: new T.Vector3() },
+        uSkyCol: { value: new T.Vector3() }, uGndCol: { value: new T.Vector3() },
+        uCamPos: { value: new T.Vector3() }, uToon: { value: 1 } };
+    }
+    _liqU.uVP.value.fromArray(cam.vp);
+    _liqU.uScene.value = AF.T3.tex(R.copyFB, 0);
+    _liqU.uRes.value.set(R.width, R.height);
+    _liqU.uTime.value = env.time;
+    var lp2 = _liqU.uLightPos.value, lc2 = _liqU.uLightCol.value;
+    for (var j = 0; j < 16; j++) {
+      lp2[j].set(R.lightPos[j * 4], R.lightPos[j * 4 + 1], R.lightPos[j * 4 + 2], R.lightPos[j * 4 + 3]);
+      lc2[j].set(R.lightCol[j * 4], R.lightCol[j * 4 + 1], R.lightCol[j * 4 + 2], R.lightCol[j * 4 + 3]);
+    }
+    _liqU.uLightCount.value = R.lightCount;
+    _liqU.uSunDir.value.fromArray(env.sunDir);
+    _liqU.uSunCol.value.fromArray(env.sunCol);
+    _liqU.uSkyCol.value.fromArray(env.skyCol);
+    _liqU.uGndCol.value.fromArray(env.gndCol);
+    _liqU.uCamPos.value.fromArray(cam.pos);
+    _liqU.uToon.value = R.toon === undefined ? 1 : R.toon;
+    if (!_liqMat) _liqMat = AF.T3B.material('liquid', S.LIQUID_VS, S.LIQUID_FS, _liqU,
+      { side: THREE.DoubleSide, depthTest: true, depthWrite: false, blend: 'premul' });
+    AF.T3B.setCamera(cam);
+    return _liqMat;
+  };
+
   R.drawLiquids = function (env, cam) {
     if (R.B.droplet.n === 0 && R.B.puddle.n === 0) return;
+    var lm = R.liquidMaterial ? R.liquidMaterial(env, cam) : null;
+    if (lm) {
+      R.B.droplet.drawThree(lm);
+      R.B.puddle.drawThree(lm);
+      return;
+    }
     var P = R.P.liquid;
     P.use();
     bindEnv(P, env, cam);
@@ -978,8 +1095,35 @@
   //  Damp soil under a pool. This is a MULTIPLY pass: an additive one cannot
   //  darken anything, which is why the previous attempt at a "dark ring"
   //  rendered as bright arcs around every puddle.
+  //  MIGRATION STAGE 5, group 7: the damp ring under a pool.
+  //
+  //  DORMANT. Game.pushWet returns immediately, so this batch is always
+  //  empty and nothing below runs in a shipping frame. The brief is explicit
+  //  that it must be kept correct and NOT enabled, so it is ported with its
+  //  multiply blend intact and left switched off. It is the only darkening
+  //  pass in the frame: made additive it draws bright arcs instead of a
+  //  shadow, and it has to precede the additive decals or cursor highlights
+  //  over damp ground go muddy.
+  //
+  //  Untested by construction - there is no way to exercise it without
+  //  enabling it, which the brief forbids.
+  var _wetU = null, _wetMat = null;
+  R.wetMaterial = function (env, cam) {
+    if (!AF.T3B || !AF.T3B.ready) return null;
+    var T = window.THREE;
+    if (!_wetU) _wetU = { uVP: { value: new T.Matrix4() }, uTime: { value: 0 } };
+    _wetU.uVP.value.fromArray(cam.vp);
+    _wetU.uTime.value = env.time;
+    if (!_wetMat) _wetMat = AF.T3B.material('wet', S.DECAL_VS, withNullNormal(S.WET_FS), _wetU,
+      { side: THREE.DoubleSide, depthTest: true, depthWrite: false, blend: 'multalpha' });
+    AF.T3B.setCamera(cam);
+    return _wetMat;
+  };
+
   R.drawWet = function (env, cam) {
     if (R.B.wet.n === 0) return;
+    var wm = R.wetMaterial ? R.wetMaterial(env, cam) : null;
+    if (wm) { R.B.wet.drawThree(wm); return; }
     var P = R.P.wet;
     P.use();
     P.m4('uVP', cam.vp);
