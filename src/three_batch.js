@@ -173,6 +173,19 @@
     R.stats.tris += batch.triCount * n;
   };
 
+  //  Draw one prepared THREE.Mesh into whatever target is currently bound.
+  //  Deliberately does NOT call setRenderTarget: the scene passes run inside
+  //  a framebuffer the raw code bound, and taking ownership of the target
+  //  here would restore the default framebuffer on the way out and send
+  //  every later raw pass to the screen - which is exactly what the sky
+  //  pass did before it was made to rebind.
+  TB.drawObject = function (mesh) {
+    scene.children.length = 0;
+    scene.add(mesh);
+    R.three.render(scene, camera);
+    R.stats.draws++;
+  };
+
   AF.T3B = TB;
 
 })(window.AF = window.AF || {});

@@ -107,10 +107,81 @@
     }
     gl.bufferSubData(gl.ELEMENT_ARRAY_BUFFER, 0, m.idx.subarray(0, iCount));
     gl.bindVertexArray(null);
+    if (AF.T3B && AF.T3B.ready) threeSync(m);
+  };
+
+  //  MIGRATION STAGE 6: the heap on three.
+  //
+  //  The raw body is an interleaved 32-byte VBO - position, normal, then
+  //  (thickness, wetness) - with a Uint32 index buffer, both grown by
+  //  doubling and rewritten only when the sugar field actually moves.
+  //  InterleavedBuffer maps that layout exactly, so the same m.vtx array is
+  //  handed straight to three rather than being deinterleaved into three
+  //  parallel attributes.
+  //
+  //  frustumCulled is off for the same reason as every batch: these are
+  //  absolute world coordinates with an identity object matrix, and a
+  //  bounding volume computed from them would be recomputed on every sync.
+  var t3 = { geo: null, mesh: null, mat: null, ib: null, uni: null, vCap: 0, iCap: 0 };
+  function threeSync(m) {
+    var T = window.THREE;
+    if (!t3.geo) {
+      t3.geo = new T.BufferGeometry();
+      t3.geo.boundingSphere = new T.Sphere(new T.Vector3(), Infinity);
+    }
+    var needV = m.verts * 8;
+    if (!t3.ib || needV > t3.vCap) {
+      t3.vCap = Math.max(needV * 2, 16384);
+      t3.ib = new T.InterleavedBuffer(new Float32Array(t3.vCap), 8);
+      t3.ib.setUsage(T.DynamicDrawUsage);
+      t3.geo.setAttribute('aP', new T.InterleavedBufferAttribute(t3.ib, 3, 0));
+      t3.geo.setAttribute('aN', new T.InterleavedBufferAttribute(t3.ib, 3, 3));
+      t3.geo.setAttribute('aI', new T.InterleavedBufferAttribute(t3.ib, 2, 6));
+    }
+    t3.ib.array.set(m.vtx.subarray(0, needV));
+    t3.ib.needsUpdate = true;
+    if (!t3.geo.index || iCount > t3.iCap) {
+      t3.iCap = Math.max(iCount * 2, 16384);
+      t3.geo.setIndex(new T.BufferAttribute(new Uint32Array(t3.iCap), 1));
+    }
+    t3.geo.index.array.set(m.idx.subarray(0, iCount));
+    t3.geo.index.needsUpdate = true;
+    t3.geo.setDrawRange(0, iCount);
+  }
+
+  HR.drawThree = function (R, env, cam) {
+    var T = window.THREE;
+    if (!t3.geo) return false;
+    if (!t3.mat) {
+      t3.uni = {
+        uVP: { value: new T.Matrix4() }, uCamPos: { value: new T.Vector3() },
+        uSunDir: { value: new T.Vector3() }, uSunCol: { value: new T.Vector3() },
+        uSkyCol: { value: new T.Vector3() }, uGndCol: { value: new T.Vector3() },
+        uTime: { value: 0 }, uToon: { value: 1 }
+      };
+      t3.mat = AF.T3B.material('heap', VS, FS, t3.uni, { side: T.DoubleSide });
+      t3.mesh = new T.Mesh(t3.geo, t3.mat);
+      t3.mesh.frustumCulled = false;
+      t3.mesh.matrixAutoUpdate = false;
+      t3.mesh.matrixWorld.identity();
+    }
+    var u = t3.uni;
+    u.uVP.value.fromArray(cam.vp);
+    u.uCamPos.value.fromArray(cam.pos);
+    u.uSunDir.value.fromArray(env.sunDir);
+    u.uSunCol.value.fromArray(env.sunCol);
+    u.uSkyCol.value.fromArray(env.skyCol);
+    u.uGndCol.value.fromArray(env.gndCol);
+    u.uTime.value = env.time;
+    u.uToon.value = env.toon === undefined ? 1 : env.toon;
+    AF.T3B.setCamera(cam);
+    AF.T3B.drawObject(t3.mesh);
+    return true;
   };
 
   HR.draw = function (R, env, cam) {
     if (!HR.ready || !iCount) return;
+    if (AF.T3B && AF.T3B.ready && HR.drawThree(R, env, cam)) return;
     var P = prog.use();
     P.m4('uVP', cam.vp);
     P.v3('uCamPos', cam.pos);

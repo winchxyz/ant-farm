@@ -269,15 +269,19 @@
   },
   "stage6_progress": {
     "done": [
-      "sky"
+      "sky",
+      "heap"
     ],
     "remaining": [
       "statics",
       "glass",
       "tubes",
-      "heap",
       "soil"
-    ],
-    "note": "soil is last by design - gl_FragDepth, two sampler3Ds, the per-frame cull flip and uQuality. The camera-inside-soil gate (B10/L8) is not live until soil moves."
+    ]
+  },
+  "stage6_heap": {
+    "what": "The sugar heap draws through three. Its interleaved 32-byte VBO maps onto THREE.InterleavedBuffer exactly, so m.vtx is handed over as-is rather than deinterleaved.",
+    "abVsRawPath": "2 px against a 3 px control, with 960 units of sugar on screen - below the noise floor.",
+    "note": "T3B.drawObject deliberately does NOT call setRenderTarget: scene passes run inside a framebuffer the raw code bound, and taking ownership would restore the default framebuffer on the way out - the bug the sky pass hit."
   }
 }
