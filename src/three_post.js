@@ -128,6 +128,40 @@
   //  The WebGLTexture inside a three target, for passes still on raw GL.
   //  setRenderTarget forces the allocation first, or properties has no
   //  __webglTexture yet and the caller silently binds null.
+  //  A raw GL 3D texture, presented to three without three ever owning or
+  //  uploading it. The soil raymarch samples two of these - the baked SDF
+  //  and the wetness volume - and both are created and written by code
+  //  outside the renderer entirely: the SDF is rendered layer by layer into
+  //  an attachment-less FBO, and the wetness volume is sub-uploaded from the
+  //  particle sim with its own UNPACK_ALIGNMENT discipline.
+  //
+  //  ExternalTexture is 2D only - three picks the texture target from the
+  //  class - so this uses Data3DTexture for the target and then forces the
+  //  GPU handle underneath it. Setting __version to match the texture's own
+  //  version is what stops three deciding it needs uploading: without it
+  //  three would try to texImage3D over the top with null data.
+  var ext3 = new WeakMap();
+  T3.extern3D = function (rawTex) {
+    if (!rawTex) return null;
+    var t = ext3.get(rawTex);
+    if (!t) {
+      t = new THREE.Data3DTexture(null, 1, 1, 1);
+      t.generateMipmaps = false;
+      t.minFilter = THREE.LinearFilter;
+      t.magFilter = THREE.LinearFilter;
+      t.wrapS = t.wrapT = t.wrapR = THREE.ClampToEdgeWrapping;
+      ext3.set(rawTex, t);
+    }
+    //  Re-assert every time: three's properties for a texture are cleared
+    //  on dispose and on a context restore, and the SDF is rebaked whenever
+    //  the player digs.
+    var props = R.three.properties.get(t);
+    props.__webglTexture = rawTex;
+    props.__webglInit = true;
+    props.__version = t.version;
+    return t;
+  };
+
   T3.raw = function (rt) {
     var props = R.three.properties.get(rt.texture);
     if (!props || !props.__webglTexture) {

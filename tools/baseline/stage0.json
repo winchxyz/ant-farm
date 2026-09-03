@@ -273,11 +273,10 @@
       "heap",
       "glass",
       "tubes",
-      "statics"
-    ],
-    "remaining": [
+      "statics",
       "soil"
-    ]
+    ],
+    "remaining": []
   },
   "stage6_heap": {
     "what": "The sugar heap draws through three. Its interleaved 32-byte VBO maps onto THREE.InterleavedBuffer exactly, so m.vtx is handed over as-is rather than deinterleaved.",
@@ -301,5 +300,20 @@
     "what": "Room, table, table legs and vitrine frames on three - the only geometry carrying a real uModel.",
     "abVsRawPath": "1 differing pixel against a 1 px control.",
     "note": "frustumCulled stays off even here: the object matrix lives in a uniform the shader applies itself, so three's bounds would be computed in the wrong space."
+  },
+  "stage6_soil": {
+    "what": "The volumetric soil raymarch on three - gl_FragDepth, two sampler3Ds, the per-frame cull flip and uQuality.",
+    "abVsRawPath": "2 differing pixels against a 2 px control.",
+    "gates": {
+      "B10_L8_cullFlip": "camera planted at the box centre: material.side flips to BackSide and the soil fills all 921,600 px. From outside, FrontSide, 644,892 px. The tank does not vanish.",
+      "B8_viewportAfterDig": "scoops 0 to 1, the very next frame lit across the full [0,0,1279,719] - not into a 96x60 corner.",
+      "sampler3D": "both bound through T3.extern3D - Data3DTexture for the TEXTURE_3D target with the GPU handle forced underneath, __version pinned so three never tries to upload over it.",
+      "uQuality": 0.65
+    },
+    "probeGround": {
+      "note": "CPU-side measurement of ant y against farm.localTop. Proven independent of the render path: identical numbers through three and raw (worstAbove 0.026, worstBelow -4.819, 10 surface ants).",
+      "worstBelow": "-4.819 is an ant below ground, a pathing matter outside this stage and not caused by it - the identical raw-path reading is the proof."
+    },
+    "cullFlipTestTrap": "avoidSoil pushes the camera back out of the box during rig.update, so a naive test reads side=FrontSide and proves nothing. The rig has to be stubbed for the duration of the render."
   }
 }

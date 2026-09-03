@@ -273,7 +273,9 @@
     B.wet = new Batch('wet', G.buildQuad(), 300, P.wet);
     R.B = B;
 
-    R.boxMesh = G.buildBox(1, 1, 1, false).build(P.soil, null);
+    var boxB = G.buildBox(1, 1, 1, false);
+    R.boxMesh = boxB.build(P.soil, null);
+    if (AF.T3B && AF.T3B.ready) R.boxGeo = AF.T3B.geoFromBuilder(boxB);
 
     R.shadowSize = 2048;
     R.shadowFB = mkFBO({ width: R.shadowSize, height: R.shadowSize, depth: 'texture', depthFilter: gl.LINEAR });
@@ -617,7 +619,109 @@
     GLX.depth(true, true);
   };
 
+  //  MIGRATION STAGE 6: the soil. Left until last, and it earns it.
+  //
+  //  This is a volumetric raymarch, not a surface. The rasterized geometry is
+  //  a unit cube expanded in the vertex shader to the farm's bounding box;
+  //  the fragment shader marches the baked signed distance field inside it
+  //  and writes gl_FragDepth from the hit point. Four things follow, and
+  //  three's defaults are wrong about all four:
+  //
+  //  * NO DEPTH PRE-PASS AND NO AUTO-GENERATED DEPTH VARIANT MAY EXIST. The
+  //    interpolated depth of the cube is the glass-facing box face, metres
+  //    in front of the soil. Anything that lays that down first and then
+  //    runs the colour pass under LESS rejects every raymarch hit, and the
+  //    tank becomes a solid slab with every ant, pebble and pool inside it
+  //    invisible (B9). RawShaderMaterial generates nothing, which is why it
+  //    and not ShaderMaterial.
+  //
+  //  * THE CULL FLIP IS PER FARM PER FRAME. Standing inside the box the
+  //    front faces are behind the eye, so back-face culling draws nothing
+  //    and the tank vanishes - which is the normal close-up view. side is
+  //    swapped on the material rather than through GLX.cull, and deliberately
+  //    WITHOUT touching needsUpdate or material.version: that keeps it a pure
+  //    state change with no recompile. Safe only because SOIL_FS does not
+  //    read gl_FrontFacing - flora and glass do, which is why those two use
+  //    DoubleSide instead (B10, L8).
+  //
+  //  * TWO sampler3Ds, neither of which three owns. See T3.extern3D.
+  //
+  //  * uQuality shortens the march on the Low preset, so it has to keep
+  //    arriving or the quality menu becomes decorative.
+  var _soilU = null, _soilMat = null;
+  R.soilMaterial = function (env, cam, farm) {
+    if (!AF.T3B || !AF.T3B.ready || !R.boxGeo) return null;
+    var T = window.THREE;
+    if (!_soilU) {
+      var lp = [], lc = [];
+      for (var i = 0; i < 16; i++) { lp.push(new T.Vector4()); lc.push(new T.Vector4()); }
+      _soilU = {
+        uVP: { value: new T.Matrix4() }, uLightVP: { value: new T.Matrix4() },
+        uLightPos: { value: lp }, uLightCol: { value: lc }, uLightCount: { value: 0 },
+        uSunDir: { value: new T.Vector3() }, uSunCol: { value: new T.Vector3() },
+        uSkyCol: { value: new T.Vector3() }, uGndCol: { value: new T.Vector3() },
+        uCamPos: { value: new T.Vector3() }, uToon: { value: 1 },
+        uShadowMap: { value: null }, uShadowTexel: { value: new T.Vector2() },
+        uBoxCenter: { value: new T.Vector3() }, uBoxHalf: { value: new T.Vector3() },
+        uSDF: { value: null }, uWetVol: { value: null },
+        uSdfMin: { value: new T.Vector3() }, uSdfMax: { value: new T.Vector3() },
+        uSoilA: { value: new T.Vector3() }, uSoilB: { value: new T.Vector3() },
+        uSoilTop: { value: new T.Vector3() },
+        uWetness: { value: 0 }, uGrainScale: { value: 1 }, uTime: { value: 0 },
+        uQuality: { value: 1 }, uTopY: { value: 0 }, uHygiene: { value: 1 },
+        uMold: { value: 0 }
+      };
+    }
+    var u = _soilU;
+    u.uVP.value.fromArray(cam.vp);
+    u.uLightVP.value.fromArray(R.lightVP);
+    var lp2 = u.uLightPos.value, lc2 = u.uLightCol.value;
+    for (var j = 0; j < 16; j++) {
+      lp2[j].set(R.lightPos[j*4], R.lightPos[j*4+1], R.lightPos[j*4+2], R.lightPos[j*4+3]);
+      lc2[j].set(R.lightCol[j*4], R.lightCol[j*4+1], R.lightCol[j*4+2], R.lightCol[j*4+3]);
+    }
+    u.uLightCount.value = R.lightCount;
+    u.uSunDir.value.fromArray(env.sunDir);
+    u.uSunCol.value.fromArray(env.sunCol);
+    u.uSkyCol.value.fromArray(env.skyCol);
+    u.uGndCol.value.fromArray(env.gndCol);
+    u.uCamPos.value.fromArray(cam.pos);
+    u.uToon.value = R.toon === undefined ? 1 : R.toon;
+    u.uShadowMap.value = AF.T3.depth(R.shadowFB);
+    u.uShadowTexel.value.set(1 / R.shadowSize, 1 / R.shadowSize);
+    u.uBoxCenter.value.fromArray(farm.center);
+    u.uBoxHalf.value.fromArray(farm.half);
+    u.uSDF.value = AF.T3.extern3D(farm.sdf.tex);
+    //  A farm without a wetness volume still has to bind SOMETHING - an
+    //  unbound sampler3D reads whatever is on its unit, and the shadow map
+    //  is a 2D texture. One black texel is the honest answer.
+    u.uWetVol.value = AF.T3.extern3D((farm.wet && farm.wet.tex) || R.zeroVol);
+    u.uSdfMin.value.fromArray(farm.sdfMin);
+    u.uSdfMax.value.fromArray(farm.sdfMax);
+    u.uSoilA.value.fromArray(farm.soilA);
+    u.uSoilB.value.fromArray(farm.soilB);
+    u.uSoilTop.value.fromArray(farm.soilTop);
+    u.uWetness.value = farm.wetness;
+    u.uGrainScale.value = farm.grainScale;
+    u.uTime.value = env.time;
+    u.uQuality.value = R.quality;
+    u.uTopY.value = farm.topY;
+    u.uHygiene.value = farm.hygiene;
+    u.uMold.value = farm.mold;
+    if (!_soilMat) _soilMat = AF.T3B.material('soil', S.SOIL_VS, S.SOIL_FS, u,
+      { side: THREE.FrontSide, depthTest: true, depthWrite: true });
+    var inside =
+      Math.abs(cam.pos[0] - farm.center[0]) < farm.half[0] + 0.05 &&
+      Math.abs(cam.pos[1] - farm.center[1]) < farm.half[1] + 0.05 &&
+      Math.abs(cam.pos[2] - farm.center[2]) < farm.half[2] + 0.05;
+    _soilMat.side = inside ? THREE.BackSide : THREE.FrontSide;
+    AF.T3B.setCamera(cam);
+    return _soilMat;
+  };
+
   R.drawSoil = function (env, cam, farm) {
+    var sm = R.soilMaterial ? R.soilMaterial(env, cam, farm) : null;
+    if (sm) { AF.T3B.drawGeo(R.boxGeo, sm); return; }
     var P = R.P.soil;
     P.use();
     bindEnv(P, env, cam);
