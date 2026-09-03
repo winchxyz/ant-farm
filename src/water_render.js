@@ -568,6 +568,98 @@
     m.side = THREE.DoubleSide;
   }
 
+  //  THE IMPOSTOR PASSES.
+  //
+  //  Both are GL_POINTS with a shader-computed gl_PointSize and a Y-FLIPPED
+  //  gl_PointCoord. Nothing about that is three-shaped, but nothing about it
+  //  needs to change either: THREE.Points issues drawArrays(POINTS) and a
+  //  RawShaderMaterial's gl_PointSize is honoured as-is. What matters is
+  //  that the geometry wraps the SAME interleaved buffer the raw path fills
+  //  - stride 6 floats, aP at 0 and aI at 3 - so WR.gather stays untouched
+  //  and there is one copy of the particle data, not two.
+  //
+  //  Losing the Y flip tips every reconstructed sphere normal upside down
+  //  and the pool lights from below; losing the point-size scale gives
+  //  either one-pixel sprites (invisible water) or 200-pixel ones (the tank
+  //  floods blue). Both shaders are carried across verbatim.
+  var _ptsGeo = null, _ptsDepth = null, _ptsThick = null, _ptsObj = null;
+  function mkPoints() {
+    if (_ptsGeo) return;
+    var T = THREE;
+    _ptsGeo = new T.BufferGeometry();
+    //  A strided view over the existing array, not a copy.
+    var buf = new T.InterleavedBuffer(data, STRIDE);
+    buf.setUsage(T.DynamicDrawUsage);
+    _ptsGeo.setAttribute('aP', new T.InterleavedBufferAttribute(buf, 3, 0));
+    _ptsGeo.setAttribute('aI', new T.InterleavedBufferAttribute(buf, 3, 3));
+    _ptsGeo._buf = buf;
+    //  Every particle carries its own absolute world position, so a bounding
+    //  sphere off the base data means nothing and three would cull the lot.
+    _ptsGeo.boundingSphere = new T.Sphere(new T.Vector3(), Infinity);
+
+    _ptsDepth = new T.RawShaderMaterial({
+      glslVersion: T.GLSL3,
+      vertexShader: AF.T3.strip(VS_PART), fragmentShader: AF.T3.strip(FS_DEPTH),
+      uniforms: {
+        uView: { value: new T.Matrix4() }, uProj: { value: new T.Matrix4() },
+        uPointScale: { value: 1 }
+      },
+      depthTest: true, depthWrite: true, depthFunc: T.LessDepth,
+      blending: T.NoBlending, transparent: false, side: T.DoubleSide
+    });
+    _ptsThick = new T.RawShaderMaterial({
+      glslVersion: T.GLSL3,
+      vertexShader: AF.T3.strip(VS_PART), fragmentShader: AF.T3.strip(FS_THICK),
+      uniforms: {
+        uView: { value: new T.Matrix4() }, uProj: { value: new T.Matrix4() },
+        uSurf: { value: null }, uInvRes: { value: new T.Vector2() },
+        uPointScale: { value: 1 }, uScale: { value: 0.13 }
+      },
+      depthTest: false, depthWrite: false, depthFunc: T.LessDepth,
+      side: T.DoubleSide
+    });
+    //  addpre is blendFunc(ONE, ONE). Thickness is an ACCUMULATION buffer
+    //  whose splats write alpha 0 in one channel, so any SRC_ALPHA source
+    //  factor multiplies the whole field by zero and every pool loses its
+    //  colour. three's AdditiveBlending is SRC_ALPHA,ONE - not this.
+    AF.T3.applyBlend(_ptsThick, 'addpre');
+
+    _ptsObj = new T.Points(_ptsGeo, _ptsDepth);
+    _ptsObj.frustumCulled = false;
+    _ptsObj.matrixAutoUpdate = false;
+    _ptsObj.matrixWorld.identity();
+  }
+
+  function drawImpostors(R, cam, w, h, pointScale) {
+    mkPoints();
+    var T3 = AF.T3;
+    //  n particles, never the capacity - the tail of `data` still holds
+    //  last frame's positions and always will.
+    _ptsGeo.setDrawRange(0, nPart);
+    _ptsGeo._buf.needsUpdate = true;
+
+    var du = _ptsDepth.uniforms;
+    du.uView.value.fromArray(cam.view);
+    du.uProj.value.fromArray(cam.proj);
+    du.uPointScale.value = pointScale;
+    _ptsObj.material = _ptsDepth;
+    FB.depth.bind(true, 0, 0, 0, 0);
+    gl.clearDepth(1.0); gl.clear(gl.DEPTH_BUFFER_BIT);
+    AF.T3B.drawObjectInto(_ptsObj, FB.depth);
+
+    var tu = _ptsThick.uniforms;
+    tu.uView.value.fromArray(cam.view);
+    tu.uProj.value.fromArray(cam.proj);
+    tu.uSurf.value = T3.tex(FB.depth);
+    tu.uInvRes.value.set(1 / w, 1 / h);
+    tu.uPointScale.value = pointScale;
+    //  read at draw time, not cached at init
+    tu.uScale.value = WR.thickScale;
+    _ptsObj.material = _ptsThick;
+    FB.thick.bind(true, 0, 0, 0, 0);
+    AF.T3B.drawObjectInto(_ptsObj, FB.thick);
+  }
+
   var _iv3 = null;
   function drawComposite(R, env, cam, tanX, tanY) {
     var T3 = AF.T3, u = WP.comp.uniforms;
@@ -720,6 +812,12 @@
 
     gl.bindVertexArray(vao);
 
+    var impostorsOnThree = !!(AF.T3 && AF.T3.ready && AF.T3B && AF.T3B.ready &&
+      FB.depth.rt && WR.useThree);
+    if (impostorsOnThree) {
+      drawImpostors(R, cam, w, h, pointScale);
+      gl.bindVertexArray(null);
+    } else {
     // ---- depth ----
     FB.depth.bind(true, 0, 0, 0, 0);
     GLX.depth(true, true); GLX.blend(false); GLX.cull(false);
@@ -739,6 +837,7 @@
       .f('uPointScale', pointScale).f('uScale', WR.thickScale);
     gl.drawArrays(gl.POINTS, 0, nPart);
     gl.bindVertexArray(null);
+    }
 
     // ---- bilateral blur ----
     //  The RANGE sigma has to be wider than a particle, or the filter treats

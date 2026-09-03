@@ -339,10 +339,24 @@
       "blur",
       "thickness blur",
       "normals",
-      "composite"
+      "composite",
+      "impostors"
     ],
-    "remaining": [
-      "the two GL_POINTS impostor passes"
-    ]
+    "remaining": []
+  },
+  "stage7_water_impostors": {
+    "what": "The two GL_POINTS impostor passes on three - THREE.Points over an InterleavedBuffer view of the SAME array WR.gather already fills, so there is one copy of the particle data.",
+    "abVsRawPath": "108 differing pixels of 1,024,000 against a 40 px control, particles frozen. 146,176 px of water drawn.",
+    "gates": {
+      "inkOutline": "2721 px darkened - water receives an outline, which needs the composite's depth write",
+      "liveKnobs": "WR.thickScale still live at draw time: 142,270 px between 0.055 and 0.24",
+      "drainToZero": "80 px of 1,024,000 with nothing gathered - no ghost puddle",
+      "occlusion": "grass and stones occlude the pool correctly in tools/shots/s7_water_full.png"
+    },
+    "halo_scene_dependence": {
+      "finding": "The gate numbers (1,838 px / 5.95 energy) are not scene-portable. On a 7,880 px footprint this build measures 738 px / 4.00, under the gate. On a 151,014 px footprint - a bigger pool, closer camera - the same build measures 15,615 px / 138.94.",
+      "whatMatters": "three 15,615 px / 138.94 vs raw 16,309 px / 141.00 on the identical scene, three marginally better. The halo magnitude is a property of the scene, not of the port.",
+      "lesson": "Quote a halo number with its footprint, or it means nothing."
+    }
   }
 }

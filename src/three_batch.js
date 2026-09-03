@@ -209,6 +209,21 @@
     TB.drawObject(_scratch);
   };
 
+  //  Draw an object into a NAMED target. drawObject aims at sceneFB, which
+  //  is what every scene pass wants; the water module needs its own targets
+  //  and passes them in. Same discipline either way: resync, name the
+  //  target, render, then hand the raw path its binding back.
+  TB.drawObjectInto = function (obj, fbo) {
+    if (R.threeResync) R.threeResync();
+    var three = R.three, target = fbo && fbo.rt;
+    if (target) three.setRenderTarget(target);
+    scene.children.length = 0;
+    scene.add(obj);
+    three.render(scene, camera);
+    if (target) { three.setRenderTarget(null); fbo.bind(false); }
+    R.stats.draws++;
+  };
+
   //  Draw one prepared THREE.Mesh into whatever target is currently bound.
   //  Deliberately does NOT call setRenderTarget: the scene passes run inside
   //  a framebuffer the raw code bound, and taking ownership of the target
