@@ -582,10 +582,6 @@
       drawCB(null, R._shadowMat, R.shadowFB);
       return;
     }
-    var P = R.P.shadow;
-    P.use();
-    P.m4('uVP', R.lightVP);
-    drawCB(P);
   };
 
   //  MIGRATION STAGE 6: the sky.
@@ -633,21 +629,6 @@
       GLX.cull(false);
       return;
     }
-    GLX.depth(false, false);
-    GLX.blend(false);
-    GLX.cull(false);
-    var P = R.P.sky;
-    P.use();
-    P.m4('uInvVP', cam.invVP);
-    P.v3('uCamPos', cam.pos);
-    P.v3('uSunDir', env.sunDir);
-    P.v3('uSunCol', env.sunCol);
-    P.v3('uRoomA', env.roomA);
-    P.v3('uRoomB', env.roomB);
-    P.f('uTime', env.time);
-    GLX.fullscreen();
-    R.stats.draws++;
-    GLX.depth(true, true);
   };
 
   //  MIGRATION STAGE 6: the soil. Left until last, and it earns it.
@@ -753,54 +734,6 @@
   R.drawSoil = function (env, cam, farm) {
     var sm = R.soilMaterial ? R.soilMaterial(env, cam, farm) : null;
     if (sm) { AF.T3B.drawGeo(R.boxGeo, sm); return; }
-    var P = R.P.soil;
-    P.use();
-    bindEnv(P, env, cam);
-    bindShadow(P);
-    P.m4('uVP', cam.vp);
-    P.v3('uBoxCenter', farm.center);
-    P.v3('uBoxHalf', farm.half);
-    P.tex('uSDF', farm.sdf.tex, gl.TEXTURE_3D);
-    //  Where the water soaked in. Shares the SDF box exactly, so uSdfMin and
-    //  uSdfMax below serve both samplers.
-    //
-    //  A farm without a volume - an old save, or one built before AF.Wet
-    //  existed - still has to bind SOMETHING. An unbound sampler3D reads
-    //  texture unit 0, which bindShadow has already filled with the 2D
-    //  shadow map, and what a sampler returns when no texture of its own
-    //  target is bound there is not worth relying on. One black texel is.
-    //
-    //  Built in R.init, NOT lazily here. GLX.texture3D finishes with
-    //  bindTexture(TEXTURE_3D, null), and Program.tex leaves its unit
-    //  active - so creating it at this point would unbind the SDF that the
-    //  line above had just bound, on that same unit, and the soil would
-    //  raymarch an empty field for the one frame it happened on.
-    P.tex('uWetVol', (farm.wet && farm.wet.tex) || R.zeroVol, gl.TEXTURE_3D);
-    P.v3('uSdfMin', farm.sdfMin);
-    P.v3('uSdfMax', farm.sdfMax);
-    P.v3('uSoilA', farm.soilA);
-    P.v3('uSoilB', farm.soilB);
-    P.v3('uSoilTop', farm.soilTop);
-    P.f('uWetness', farm.wetness);
-    P.f('uGrainScale', farm.grainScale);
-    P.f('uTime', env.time);
-    P.f('uQuality', R.quality);
-    P.f('uTopY', farm.topY);
-    P.f('uHygiene', farm.hygiene);
-    P.f('uMold', farm.mold);
-    GLX.depth(true, true);
-    GLX.blend(false);
-    //  The raymarch is driven by the bounding box. Standing inside it, the
-    //  front faces are behind the eye, so back-face culling would draw
-    //  nothing at all and the tank would vanish. Flip to front-culling and
-    //  march from the inside instead.
-    var inside =
-      Math.abs(cam.pos[0] - farm.center[0]) < farm.half[0] + 0.05 &&
-      Math.abs(cam.pos[1] - farm.center[1]) < farm.half[1] + 0.05 &&
-      Math.abs(cam.pos[2] - farm.center[2]) < farm.half[2] + 0.05;
-    GLX.cull(inside ? 'front' : 'back');
-    R.boxMesh.draw();
-    R.stats.draws++;
   };
 
   //  MIGRATION STAGE 5, group 4: ants, the bestiary and brood.
@@ -835,23 +768,7 @@
     return m;
   };
 
-  R.useCreature = function (env, cam, isAnt) {
-    var P = R.P.creature;
-    P.use();
-    bindEnv(P, env, cam);
-    bindShadow(P);
-    P.m4('uVP', cam.vp);
-    P.f('uTime', env.time);
-    //  0 = brood, 1 = bestiary creature, 2 = a real ant. The split matters
-    //  because the tagma tint below is an ANT colour pattern; applied to a
-    //  beetle or a woodlouse it would re-tune bodies that are already tuned.
-    P.f('uIsAnt', isAnt ? 2 : 0);
-    GLX.depth(true, true);
-    GLX.blend(false);
-    GLX.cull('back');
-    return P;
-  };
-  //  MIGRATION STAGE 5, group 1: the seven prop batches.
+    //  MIGRATION STAGE 5, group 1: the seven prop batches.
   //
   //  Props ride the CREATURE program at uIsAnt 0, the same slot brood uses.
   //  They survive the brood stage selector only because every prop mesh
@@ -951,19 +868,7 @@
     return _floraMat;
   };
 
-  R.useFlora = function (env, cam) {
-    var P = R.P.flora;
-    P.use();
-    bindEnv(P, env, cam);
-    bindShadow(P);
-    P.m4('uVP', cam.vp);
-    P.f('uTime', env.time);
-    GLX.depth(true, true);
-    GLX.blend(false);
-    GLX.cull(false);
-    return P;
-  };
-  //  MIGRATION STAGE 6: the static meshes - the room, the table and its
+    //  MIGRATION STAGE 6: the static meshes - the room, the table and its
   //  legs, the vitrine frames. These are the only geometry here that carries
   //  a real uModel rather than absolute per-instance world positions, and
   //  the only geometry that could legitimately be frustum culled. It still
@@ -1024,22 +929,6 @@
         return;
       }
     }
-    var P = R.P.staticM;
-    P.use();
-    bindEnv(P, env, cam);
-    bindShadow(P);
-    P.m4('uVP', cam.vp);
-    P.m4('uModel', model);
-    P.v3('uAlbedo', albedo);
-    P.f('uRough', rough);
-    P.f('uMetal', metal);
-    P.f('uMatType', matType || 0);
-    P.f('uTime', env.time);
-    GLX.depth(true, true);
-    GLX.blend(false);
-    GLX.cull('back');
-    mesh.draw();
-    R.stats.draws++;
   };
 
   //  The scene target has two draw buffers, but the additive passes below
@@ -1108,17 +997,6 @@
     if (R.B.decal.n === 0) return;
     var m = R.decalMaterial ? R.decalMaterial(env, cam, false) : null;
     if (m) { R.B.decal.drawThree(m); return; }
-    var P = R.P.decal;
-    P.use();
-    P.m4('uVP', cam.vp);
-    P.f('uTime', env.time);
-    GLX.depth(true, false);
-    GLX.blend('addpre');
-    GLX.cull(false);
-    R.colorOnly();
-    R.B.decal.upload();
-    R.B.decal.draw();
-    R.restoreMRT();
   };
 
   //  Build previews ignore depth. A silhouette of a room you have not dug yet
@@ -1128,18 +1006,6 @@
     if (R.B.ghost.n === 0) return;
     var mg = R.decalMaterial ? R.decalMaterial(env, cam, true) : null;
     if (mg) { R.B.ghost.drawThree(mg); return; }
-    var P = R.P.decal;
-    P.use();
-    P.m4('uVP', cam.vp);
-    P.f('uTime', env.time);
-    GLX.depth(false, false);
-    GLX.blend('addpre');
-    GLX.cull(false);
-    R.colorOnly();
-    R.B.ghost.upload();
-    R.B.ghost.draw();
-    R.restoreMRT();
-    GLX.depth(true, false);
   };
 
   //  MIGRATION STAGE 5, group 5: pheromone trails and particles.
@@ -1202,32 +1068,6 @@
       if (R.B.particle.n > 0) R.B.particle.drawThree(R.billboardMaterial(env, cam, 'particle'));
       return;
     }
-    GLX.depth(true, false);
-    GLX.blend('addpre');
-    GLX.cull(false);
-    R.colorOnly();
-    var P;
-    if (R.B.phero.n > 0) {
-      P = R.P.phero;
-      P.use();
-      P.m4('uVP', cam.vp);
-      P.v3('uRight', right);
-      P.v3('uUp', up);
-      P.f('uTime', env.time);
-      R.B.phero.upload();
-      R.B.phero.draw();
-    }
-    if (R.B.particle.n > 0) {
-      P = R.P.particle;
-      P.use();
-      P.m4('uVP', cam.vp);
-      P.v3('uRight', right);
-      P.v3('uUp', up);
-      P.f('uTime', env.time);
-      R.B.particle.upload();
-      R.B.particle.draw();
-    }
-    R.restoreMRT();
   };
 
   R.copyScene = function () {
@@ -1245,13 +1085,6 @@
       R.sceneFB.bind(false);
       return;
     }
-    GLX.depth(false, false);
-    GLX.blend(false);
-    var P = R.P.copy;
-    P.use();
-    P.tex('uTex', R.sceneFB.color[0]);
-    GLX.fullscreen();
-    R.sceneFB.bind(false);
   };
 
   //  MIGRATION STAGE 6: glass and the connecting tubes.
@@ -1302,20 +1135,7 @@
     mat.uniforms.uGlassCol.value.fromArray(col);
   };
 
-  R.useGlass = function (env, cam) {
-    var P = R.P.glass;
-    P.use();
-    bindEnv(P, env, cam);
-    P.m4('uVP', cam.vp);
-    P.tex('uScene', R.copyFB.color[0]);
-    P.v2('uRes', R.width, R.height);
-    P.f('uTime', env.time);
-    GLX.depth(true, false);
-    GLX.blend('premul');
-    GLX.cull(false);
-    return P;
-  };
-
+  
   //  Water WRITES DEPTH. That is not a detail: the ink outline in the post
   //  chain is a Sobel over depth + normals, so with depth-write off - which
   //  is what this pass used to do - water could never receive an outline at
@@ -1373,20 +1193,6 @@
       R.B.puddle.drawThree(lm);
       return;
     }
-    var P = R.P.liquid;
-    P.use();
-    bindEnv(P, env, cam);
-    P.m4('uVP', cam.vp);
-    P.tex('uScene', R.copyFB.color[0]);
-    P.v2('uRes', R.width, R.height);
-    P.f('uTime', env.time);
-    GLX.cull(false);
-    GLX.depth(true, false);
-    GLX.blend('premul');
-    R.B.droplet.upload();
-    R.B.droplet.draw();
-    R.B.puddle.upload();
-    R.B.puddle.draw();
   };
 
   //  Damp soil under a pool. This is a MULTIPLY pass: an additive one cannot
@@ -1421,18 +1227,6 @@
     if (R.B.wet.n === 0) return;
     var wm = R.wetMaterial ? R.wetMaterial(env, cam) : null;
     if (wm) { R.B.wet.drawThree(wm); return; }
-    var P = R.P.wet;
-    P.use();
-    P.m4('uVP', cam.vp);
-    P.f('uTime', env.time);
-    GLX.depth(true, false);
-    GLX.blend('multalpha');
-    GLX.cull(false);
-    R.colorOnly();
-    R.B.wet.upload();
-    R.B.wet.draw();
-    R.restoreMRT();
-    GLX.blend('premul');
   };
 
   // ==================================================================
@@ -1480,35 +1274,7 @@
         uTex: T3.tex(R.aoFB2), uDepth: T3.depth(R.sceneFB),
         uDir: vec2Of(0, 1), uTexel: aoT
       });
-    } else if (fx.ao > 0.001) {
-      R.aoFB.bind(false);
-      P = R.P.ssao; P.use();
-      P.tex('uDepth', R.sceneFB.depthTex);
-      P.tex('uNormal', R.sceneFB.color[1]);
-      P.m4('uInvProj', cam.invProj);
-      P.m4('uProj', cam.proj);
-      P.m4('uView', cam.view);
-      P.v2('uRes', R.aoFB.width, R.aoFB.height);
-      P.f('uRadius', fx.aoRadius);
-      P.f('uStrength', fx.aoStrength);
-      P.f('uTime', env.time);
-      GLX.fullscreen();
-      P = R.P.blur;
-      R.aoFB2.bind(false);
-      P.use();
-      P.tex('uTex', R.aoFB.color[0]);
-      P.tex('uDepth', R.sceneFB.depthTex);
-      P.v2('uDir', 1, 0);
-      P.v2('uTexel', 1 / R.aoFB.width, 1 / R.aoFB.height);
-      GLX.fullscreen();
-      R.aoFB.bind(false);
-      P.use();
-      P.tex('uTex', R.aoFB2.color[0]);
-      P.tex('uDepth', R.sceneFB.depthTex);
-      P.v2('uDir', 0, 1);
-      P.v2('uTexel', 1 / R.aoFB.width, 1 / R.aoFB.height);
-      GLX.fullscreen();
-    } else {
+} else {
       R.aoFB.bind(true, 1, 1, 1, 1);
     }
 
@@ -1550,37 +1316,7 @@
           uScatter: fx.bloomScatter
         });
       }
-    } else {
-      R.bloom[0].bind(false);
-      P = R.P.bright; P.use();
-      P.tex('uTex', R.sceneFB.color[0]);
-      P.f('uThreshold', fx.bloomThreshold);
-      P.f('uSoft', 0.7);
-      GLX.fullscreen();
-      P = R.P.down;
-      for (i = 1; i < R.bloom.length; i++) {
-        R.bloom[i].bind(false);
-        P.use();
-        P.tex('uTex', R.bloom[i - 1].color[0]);
-        P.v2('uTexel', 1 / R.bloom[i - 1].width, 1 / R.bloom[i - 1].height);
-        GLX.fullscreen();
-      }
-      R.bloomUp[last].bind(false);
-      P = R.P.copy; P.use();
-      P.tex('uTex', R.bloom[last].color[0]);
-      GLX.fullscreen();
-      P = R.P.up;
-      for (i = last - 1; i >= 0; i--) {
-        R.bloomUp[i].bind(false);
-        P.use();
-        P.tex('uTex', R.bloomUp[i + 1].color[0]);
-        P.tex('uPrev', R.bloom[i].color[0]);
-        P.v2('uTexel', 1 / R.bloomUp[i + 1].width, 1 / R.bloomUp[i + 1].height);
-        P.f('uScatter', fx.bloomScatter);
-        GLX.fullscreen();
-      }
     }
-
     // dof
     if (fx.dof > 0.001 && R.cocPass) {
       R.cocPass.render(R.dofA, {
@@ -1593,23 +1329,7 @@
         uTexel: vec2Of(1 / R.dofA.width, 1 / R.dofA.height),
         uMaxCoC: fx.maxCoC
       });
-    } else if (fx.dof > 0.001) {
-      R.dofA.bind(false);
-      P = R.P.coc; P.use();
-      P.tex('uColor', R.sceneFB.color[0]);
-      P.tex('uDepth', R.sceneFB.depthTex);
-      P.f('uNear', cam.near); P.f('uFar', cam.far);
-      P.f('uFocus', fx.focus);
-      P.f('uAperture', fx.aperture);
-      P.f('uMaxCoC', fx.maxCoC);
-      GLX.fullscreen();
-      R.dofB.bind(false);
-      P = R.P.dof; P.use();
-      P.tex('uTex', R.dofA.color[0]);
-      P.v2('uTexel', 1 / R.dofA.width, 1 / R.dofA.height);
-      P.f('uMaxCoC', fx.maxCoC);
-      GLX.fullscreen();
-    } else {
+} else {
       //  DISABLED MEANS ALPHA 0, not black. The composite reads uDOF.a as
       //  the blend weight, so clearing this to opaque black would blur the
       //  whole frame to nothing on the Low preset.
@@ -1628,21 +1348,7 @@
         uSunUV: vec2Of(fx.sunUV[0], fx.sunUV[1]),
         uDecay: 0.965, uDensity: 0.72, uWeight: 0.11, uExposure: 0.30
       });
-    } else if (fx.rays > 0.001 && fx.sunOnScreen) {
-      R.raysFB.bind(false);
-      P = R.P.copy; P.use();
-      P.tex('uTex', (R.T3bloom ? AF.T3.raw(R.T3bloom.down[1]) : R.bloom[1].color[0]));
-      GLX.fullscreen();
-      R.raysFB2.bind(false);
-      P = R.P.godray; P.use();
-      P.tex('uTex', R.raysFB.color[0]);
-      P.v2('uSunUV', fx.sunUV[0], fx.sunUV[1]);
-      P.f('uDecay', 0.965);
-      P.f('uDensity', 0.72);
-      P.f('uWeight', 0.11);
-      P.f('uExposure', 0.30);
-      GLX.fullscreen();
-    } else {
+} else {
       R.raysFB2.bind(true, 0, 0, 0, 1);
     }
 

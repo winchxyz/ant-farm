@@ -699,12 +699,6 @@
   // ---------------------------------------------------------------
   WR.init = function (R) {
     gl = R.gl; GLX = AF.GLX;
-    P.part = GLX.program(VS_PART, FS_DEPTH, 'wdepth');
-    P.thick = GLX.program(VS_PART, FS_THICK, 'wthick');
-    P.blur = GLX.program(VS_FULL, FS_BLUR, 'wblur');
-    P.tblur = GLX.program(VS_FULL, FS_TBLUR, 'wtblur');
-    P.nrm = GLX.program(VS_FULL, FS_NORMAL, 'wnrm');
-    P.comp = GLX.program(VS_FULL, FS_COMP, 'wcomp');
 
     data = new Float32Array((AF.PS ? AF.PS.MAX_RESIDENT : 2600) * STRIDE);
     vbo = gl.createBuffer();
@@ -814,31 +808,8 @@
 
     var impostorsOnThree = !!(AF.T3 && AF.T3.ready && AF.T3B && AF.T3B.ready &&
       FB.depth.rt && WR.useThree);
-    if (impostorsOnThree) {
-      drawImpostors(R, cam, w, h, pointScale);
-      gl.bindVertexArray(null);
-    } else {
-    // ---- depth ----
-    FB.depth.bind(true, 0, 0, 0, 0);
-    GLX.depth(true, true); GLX.blend(false); GLX.cull(false);
-    gl.clearDepth(1.0); gl.clear(gl.DEPTH_BUFFER_BIT);
-    P.part.use()
-      .m4('uView', cam.view).m4('uProj', cam.proj)
-      .f('uPointScale', pointScale);
-    gl.drawArrays(gl.POINTS, 0, nPart);
-
-    // ---- thickness (additive, no depth) ----
-    FB.thick.bind(true, 0, 0, 0, 0);
-    GLX.depth(false, false); GLX.blend('addpre');
-    P.thick.use()
-      .m4('uView', cam.view).m4('uProj', cam.proj)
-      .tex('uSurf', FB.depth.color[0])
-      .v2('uInvRes', 1 / w, 1 / h)
-      .f('uPointScale', pointScale).f('uScale', WR.thickScale);
-    gl.drawArrays(gl.POINTS, 0, nPart);
+    drawImpostors(R, cam, w, h, pointScale);
     gl.bindVertexArray(null);
-    }
-
     // ---- bilateral blur ----
     //  The RANGE sigma has to be wider than a particle, or the filter treats
     //  the bump between two neighbouring spheres as a different surface and
@@ -860,10 +831,10 @@
     //  A/B switch. The only trusted water measurement in this repo works by
     //  reading the same frame twice with one thing changed, so the two paths
     //  have to stay switchable from the console for as long as both exist.
-    var T3 = AF.T3, useT3 = !!(T3 && T3.ready && FB.depth.rt && WR.useThree);
-    if (useT3) mkPasses();
+    var T3 = AF.T3;
+    mkPasses();
     for (var pass = 0; pass < 1; pass++) {
-      if (useT3) {
+      {
         //  The ping-pong ENDS IN FB.depth. Swapping the last write leaves
         //  the normals rebuilt from the unsmoothed field and the pool comes
         //  back cobbled.
@@ -871,28 +842,14 @@
           uSigR: sigR, uSigD: sigD, uKernel: kernel, uKernelMax: 6.0 });
         WP.blur.render(FB.depth, { uSrc: T3.tex(FB.blur), uDir: [0, 1], uSize: [w, h],
           uSigR: sigR, uSigD: sigD, uKernel: kernel, uKernelMax: 6.0 });
-        continue;
       }
-      FB.blur.bind(false);
-      P.blur.use().tex('uSrc', FB.depth.color[0]);
-      gl.uniform2i(P.blur.u['uDir'], 1, 0);
-      gl.uniform2i(P.blur.u['uSize'], w, h);
-      P.blur.f('uSigR', sigR).f('uSigD', sigD).f('uKernel', kernel).f('uKernelMax', 6.0);
-      GLX.fullscreen();
-
-      FB.depth.bind(false);
-      P.blur.use().tex('uSrc', FB.blur.color[0]);
-      gl.uniform2i(P.blur.u['uDir'], 0, 1);
-      gl.uniform2i(P.blur.u['uSize'], w, h);
-      P.blur.f('uSigR', sigR).f('uSigD', sigD).f('uKernel', kernel).f('uKernelMax', 6.0);
-      GLX.fullscreen();
     }
 
     // ---- thickness blur ----
     //  Runs AFTER the depth blur, because it masks itself against the depth
     //  buffer and wants the smoothed silhouette rather than the raw splats.
     //  Two passes, ping-ponging thick -> thick2 -> thick.
-    if (useT3) {
+    {
       //  and this ping-pong ends in FB.thick, for the same reason
       WP.tblur.render(FB.thick2, { uSrc: T3.tex(FB.thick), uSurf: T3.tex(FB.depth),
         uDir: [1, 0], uSize: [w, h], uSigR: sigR,
@@ -903,85 +860,8 @@
       WP.nrm.render(FB.nrm, { uDepth: T3.tex(FB.depth),
         uInvRes: [1 / w, 1 / h], uTan: [tanX, tanY], uSize: [w, h] });
       drawComposite(R, env, cam, tanX, tanY);
-      return;
     }
-    FB.thick2.bind(false);
-    P.tblur.use().tex('uSrc', FB.thick.color[0]).tex('uSurf', FB.depth.color[0]);
-    gl.uniform2i(P.tblur.u['uDir'], 1, 0);
-    gl.uniform2i(P.tblur.u['uSize'], w, h);
-    //  HALF a particle radius, not a whole one. The depth blur wants to span
-    //  a sphere so its bumps disappear; the thickness only has to span the
-    //  GAP between spheres. Reaching a full radius averages the film over an
-    //  area far larger than its own variation and pulls the peak down to the
-    //  area mean - measured, the dots vanished and so did the colour, leaving
-    //  a sandy haze. Half a radius kills the dots and keeps the body.
-    P.tblur.f('uSigR', sigR).f('uKernel', kernel * 0.5).f('uKernelMax', 3.0);
-    GLX.fullscreen();
 
-    FB.thick.bind(false);
-    P.tblur.use().tex('uSrc', FB.thick2.color[0]).tex('uSurf', FB.depth.color[0]);
-    gl.uniform2i(P.tblur.u['uDir'], 0, 1);
-    gl.uniform2i(P.tblur.u['uSize'], w, h);
-    P.tblur.f('uSigR', sigR).f('uKernel', kernel * 0.5).f('uKernelMax', 3.0);
-    GLX.fullscreen();
-
-    // ---- normals ----
-    FB.nrm.bind(false);
-    P.nrm.use().tex('uDepth', FB.depth.color[0])
-      .v2('uInvRes', 1 / w, 1 / h).v2('uTan', tanX, tanY);
-    gl.uniform2i(P.nrm.u['uSize'], w, h);
-    GLX.fullscreen();
-
-    // ---- composite back into the scene ----
-    R.sceneFB.bind(false);
-    gl.viewport(0, 0, R.width, R.height);
-    GLX.depth(true, true);
-    GLX.blend('premul');
-    GLX.cull(false);
-    var Pc = P.comp.use();
-    Pc.tex('uScene', R.copyFB.color[0]);
-    Pc.tex('uNrmDepth', FB.nrm.color[0]);
-    Pc.tex('uThick', FB.thick.color[0]);
-    //  The blurred depth target, for its ALPHA: the fraction of the blur
-    //  kernel that contained water, which is the composite's silhouette test.
-    //  This is the same texture FS_THICK samples, but by now the two blur
-    //  passes have written back into it, so the alpha is the 2D estimate and
-    //  not the raw binary mask the thickness pass saw.
-    Pc.tex('uSurf', FB.depth.color[0]);
-    Pc.m4('uInvView', cam.invView || _invView(cam));
-    Pc.m4('uProj', cam.proj);
-    Pc.v3('uCamPos', cam.pos);
-    Pc.v3('uSunDir', env.sunDir);
-    Pc.v3('uSunCol', env.sunCol);
-    Pc.v3('uSkyCol', env.skyCol);
-    Pc.v3('uGndCol', env.gndCol);
-    //  Beer-Lambert coefficients: red goes first, blue survives longest.
-    Pc.v3('uAbsorb', 2.60, 0.95, 0.42);
-    Pc.v3('uScatter', 0.22, 0.52, 0.78);
-    Pc.v2('uInvRes', 1 / R.width, 1 / R.height);
-    Pc.v2('uTan', tanX, tanY);
-    Pc.f('uTime', env.time);
-    //  Absorption only - the coverage ramp reads th.r raw, so this tints the
-    //  water without touching its silhouette.
-    //
-    //  It was 1.0, tuned when the thickness field was still peaky: the dots
-    //  at the sphere centres carried the colour and the gaps between them
-    //  carried none. Smoothing the thickness replaced those peaks with the
-    //  area mean, which is the honest number and is a good deal lower, so a
-    //  one-particle film came out colourless - a pale sheen that read as wet
-    //  sand rather than as water. Scaling the absorption input back up puts
-    //  the tint where the peaks used to put it, but spread evenly over the
-    //  film instead of stamped on it once per particle.
-    Pc.f('uThickK', WR.thickK);
-    //  How hard a THIN film is tinted. Absorption alone leaves one-particle
-    //  water colourless, which is honest and unreadable; this is the
-    //  storybook allowance. Live-tunable as AF.WR.tint while dialling it in.
-    Pc.f('uTint', WR.tint);
-    Pc.f('uRefr', 1.0);
-    Pc.f('uToon', env.toon === undefined ? 1 : env.toon);
-    GLX.fullscreen();
-    GLX.blend(false);
-    GLX.depth(true, false);
   };
 
   var _iv = null;

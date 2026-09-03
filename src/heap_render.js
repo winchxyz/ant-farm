@@ -69,7 +69,6 @@
 
   HR.init = function (R) {
     gl = R.gl; GLX = AF.GLX;
-    prog = GLX.program(VS, FS, 'heap');
     vao = gl.createVertexArray();
     vbo = gl.createBuffer();
     ibo = gl.createBuffer();
@@ -179,25 +178,11 @@
     return true;
   };
 
+  //  MIGRATION STAGE 8. The raw body is gone; this is the three path and
+  //  the only path. Kept as HR.draw so render_scene's call site is unchanged.
   HR.draw = function (R, env, cam) {
     if (!HR.ready || !iCount) return;
-    if (AF.T3B && AF.T3B.ready && HR.drawThree(R, env, cam)) return;
-    var P = prog.use();
-    P.m4('uVP', cam.vp);
-    P.v3('uCamPos', cam.pos);
-    P.v3('uSunDir', env.sunDir);
-    P.v3('uSunCol', env.sunCol);
-    P.v3('uSkyCol', env.skyCol);
-    P.v3('uGndCol', env.gndCol);
-    P.f('uTime', env.time);
-    P.f('uToon', env.toon === undefined ? 1 : env.toon);
-    GLX.depth(true, true);
-    GLX.blend(false);
-    GLX.cull(false);
-    gl.bindVertexArray(vao);
-    gl.drawElements(gl.TRIANGLES, iCount, gl.UNSIGNED_INT, 0);
-    gl.bindVertexArray(null);
-    R.stats.draws++;
+    HR.drawThree(R, env, cam);
   };
 
   AF.HeapR = HR;

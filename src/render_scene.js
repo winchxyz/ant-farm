@@ -206,15 +206,9 @@
       //  tank black - the ortho light box is fitted to the ant-scale focus
       //  radius, not to the room.
       var q;
-      if (shadowMat) {
-        for (q = 0; q < antBatches.length; q++) B[antBatches[q]].drawThreeInto(shadowMat, fbo);
-        for (q = 0; q < propBatches.length; q++) B[propBatches[q]].drawThreeInto(shadowMat, fbo);
-        for (q = 0; q < floraBatches.length; q++) B[floraBatches[q]].drawThreeInto(shadowMat, fbo);
-        return;
-      }
-      for (q = 0; q < antBatches.length; q++) B[antBatches[q]].draw();
-      for (q = 0; q < propBatches.length; q++) B[propBatches[q]].draw();
-      for (q = 0; q < floraBatches.length; q++) B[floraBatches[q]].draw();
+      for (q = 0; q < antBatches.length; q++) B[antBatches[q]].drawThreeInto(shadowMat, fbo);
+      for (q = 0; q < propBatches.length; q++) B[propBatches[q]].drawThreeInto(shadowMat, fbo);
+      for (q = 0; q < floraBatches.length; q++) B[floraBatches[q]].drawThreeInto(shadowMat, fbo);
     });
 
     // ================= SCENE =================
@@ -268,57 +262,28 @@
     //  the grouping preserved exactly: 2 for real ants and the spider,
     //  1 for the bestiary, 0 for brood. Regrouping these gives beetles ant
     //  colouring and breaks the brood stage selector (B16).
-    var antMat = R.creatureMaterial ? R.creatureMaterial(env, cam, 2) : null;
-    var P = antMat ? null : R.useCreature(env, cam, true);
-    if (antMat) {
-      B.ant.drawThree(antMat); B.antMid.drawThree(antMat); B.antLow.drawThree(antMat);
-      B.soldier.drawThree(antMat); B.soldierMid.drawThree(antMat);
-      B.queen.drawThree(antMat); B.alate.drawThree(antMat); B.spider.drawThree(antMat);
-    } else {
-    B.ant.draw(); B.antMid.draw(); B.antLow.draw();
-    B.soldier.draw(); B.soldierMid.draw();
-    B.queen.draw(); B.alate.draw(); B.spider.draw();
-    }
+    var antMat = R.creatureMaterial(env, cam, 2);
+    B.ant.drawThree(antMat); B.antMid.drawThree(antMat); B.antLow.drawThree(antMat);
+    B.soldier.drawThree(antMat); B.soldierMid.drawThree(antMat);
+    B.queen.drawThree(antMat); B.alate.drawThree(antMat); B.spider.drawThree(antMat);
     //  The bestiary. This list is separate from antBatches above, which
     //  only uploads and casts shadows - a batch missing from HERE is
     //  simulated, uploaded, and shadowed, but never actually drawn.
     //  The bestiary keeps the chitin detail but not the ant tagma pattern.
-    if (antMat) {
-      var bestMat = R.creatureMaterial(env, cam, 1);
-      B.woodlouse.drawThree(bestMat); B.cricket.drawThree(bestMat);
-      B.beetle.drawThree(bestMat); B.centipede.drawThree(bestMat);
-      var broodMat = R.creatureMaterial(env, cam, 0);
-      B.brood.drawThree(broodMat);
-    } else {
-    P.f('uIsAnt', 1);
-    B.woodlouse.draw(); B.cricket.draw(); B.beetle.draw(); B.centipede.draw();
-    P.f('uIsAnt', 0);
-    B.brood.draw();
-    }
-    //  MIGRATION STAGE 5, group 1. The props draw through three from here;
-    //  ants, the bestiary and brood are still raw above. Both write the same
-    //  MRT pair with the same depth state, so they interleave in one pass.
-    //  Props share the creature PROGRAM with the ants above, so the choice
-    //  of path is not theirs to make independently: taking the raw branch
-    //  here after the ants took the three branch draws them with whatever
-    //  program happened to be bound last, because nothing called
-    //  R.useCreature to bind one. Measured, that was 41,654 wrong pixels.
-    //  One decision for the whole group.
-    if (antMat) {
-      var propMat = R.propMaterial(env, cam);
-      for (i = 0; i < propBatches.length; i++) B[propBatches[i]].drawThree(propMat);
-    } else {
-      for (i = 0; i < propBatches.length; i++) B[propBatches[i]].draw();
-    }
+    var bestMat = R.creatureMaterial(env, cam, 1);
+    B.woodlouse.drawThree(bestMat); B.cricket.drawThree(bestMat);
+    B.beetle.drawThree(bestMat); B.centipede.drawThree(bestMat);
+    var broodMat = R.creatureMaterial(env, cam, 0);
+    B.brood.drawThree(broodMat);
+    //  Props ride the creature program at uIsAnt 0, the same slot brood uses,
+    //  and survive the brood stage selector only because every prop mesh
+    //  carries aPart.w == 0 and every prop push passes variant 0.
+    var propMat = R.propMaterial(env, cam);
+    for (i = 0; i < propBatches.length; i++) B[propBatches[i]].drawThree(propMat);
 
     // flora
-    var floraMat = R.floraMaterial ? R.floraMaterial(env, cam) : null;
-    if (floraMat) {
-      for (i = 0; i < floraBatches.length; i++) B[floraBatches[i]].drawThree(floraMat);
-    } else {
-      R.useFlora(env, cam);
-      for (i = 0; i < floraBatches.length; i++) B[floraBatches[i]].draw();
-    }
+    var floraMat = R.floraMaterial(env, cam);
+    for (i = 0; i < floraBatches.length; i++) B[floraBatches[i]].drawThree(floraMat);
 
     // the sugar heap: one mesh, one silhouette, one ink outline
     if (AF.HeapR) { AF.HeapR.sync(); AF.HeapR.draw(R, env, cam); }
@@ -335,24 +300,15 @@
     // glass needs a copy of what is behind it
     R.copyScene();
     var glassMat = (R.glassMaterial && this.st.glassGeo) ? R.glassMaterial(env, cam) : null;
-    var GP = glassMat ? null : R.useGlass(env, cam);
     if (!this.hideGlass) {
       for (i = 0; i < vis.length; i++) {
         m4.identity(this.st.model);
         m4.translate(this.st.model, this.st.model, vis[i].center);
-        if (glassMat) {
-          R.glassPer(glassMat, this.st.model, 0.55, vis[i].biome.glass);
-          AF.T3B.drawGeo(this.st.glassGeo, glassMat);
-        } else {
-          GP.m4('uModel', this.st.model);
-          GP.f('uTint', 0.55);
-          GP.v3('uGlassCol', vis[i].biome.glass);
-          this.st.glass.draw();
-          R.stats.draws++;
-        }
+        R.glassPer(glassMat, this.st.model, 0.55, vis[i].biome.glass);
+        AF.T3B.drawGeo(this.st.glassGeo, glassMat);
       }
     }
-    this.drawTubes(env, cam, GP, glassMat);
+    this.drawTubes(env, cam, glassMat);
     R.drawLiquids(env, cam);
 
     //  Screen-space water. It has to come after copyScene so it can refract
@@ -374,7 +330,7 @@
   // ------------------------------------------------------------------
   //  connection tubes between vitrines
   // ------------------------------------------------------------------
-  Game.drawTubes = function (env, cam, GP, glassMat) {
+  Game.drawTubes = function (env, cam, glassMat) {
     var mdl = m4.create();
     for (var i = 0; i < this.world.links.length; i++) {
       var L = this.world.links[i];
@@ -397,16 +353,8 @@
       mdl[8] = zx * len; mdl[9] = zy * len; mdl[10] = zz * len; mdl[11] = 0;
       mdl[12] = a[0]; mdl[13] = a[1]; mdl[14] = a[2]; mdl[15] = 1;
       var tcol = L.edge.build >= 1 ? [0.72, 0.92, 0.86] : [0.95, 0.62, 0.35];
-      if (glassMat && this.st.tubeGeo) {
-        R.glassPer(glassMat, mdl, 0.35, tcol);
-        AF.T3B.drawGeo(this.st.tubeGeo, glassMat);
-      } else {
-        GP.m4('uModel', mdl);
-        GP.f('uTint', 0.35);
-        GP.v3('uGlassCol', tcol);
-        this.st.tube.draw();
-        R.stats.draws++;
-      }
+      R.glassPer(glassMat, mdl, 0.35, tcol);
+      AF.T3B.drawGeo(this.st.tubeGeo, glassMat);
     }
   };
 

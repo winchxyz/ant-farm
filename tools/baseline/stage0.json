@@ -391,5 +391,19 @@
       "errorLog": 0,
       "glGetError": 0
     }
+  },
+  "stage8_deadcode_sweep": {
+    "removed": "481 net lines. Every fallback branch across renderer.js, render_scene.js, water_render.js and heap_render.js, the three helpers whose only callers were those branches (useCreature, useFlora, useGlass), and the raw bodies of HeapR.draw and the water blur/thickness/normal/composite chain.",
+    "remaining_R_P_refs": 1,
+    "whatIsLeft": "R.P.bake only - it renders into individual layers of a 3D texture through gl.framebufferTextureLayer on an attachment-less FBO, which three's render targets do not express. Runs on dig, not per frame.",
+    "method": "brace-matched function spans rather than line anchors, syntax-checked after every cut, then 4,710 strict frames over dig, pour, particles, build ghost, creatures and selection.",
+    "checklist": {
+      "strictFrames": 4710,
+      "lastError": null,
+      "errorLog": 0,
+      "glGetError": 0,
+      "check.js": "33668 triangles across 27 meshes, failures 0",
+      "glsl_lint.js": "shaders with problems: 0"
+    }
   }
 }
